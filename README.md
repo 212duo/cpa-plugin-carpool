@@ -91,7 +91,7 @@
 
 - [x] **v0.1.0 (Prototype)**: 独立微服务验证跑通、实时倒计时算法、一键核销与零信任脱敏。
 - [ ] **v0.2.0 (Native ABI)**: 封装为 Go 原生动态库 `.so`，实现 `pluginapi.Scheduler` 与 `ResourceRoutes`，摆脱 Python 守护进程。
-- [ ] **v0.3.0 (Security & Limits)**: 单 Key RPM/并发限频、到期自动失效（`expire_at`）、重置卡单周使用配额。
+- [ ] **v0.3.0 (Security & Limits)**: 单 Key RPM/并发限频、到期自动失效（`expire_at`）。
 - [ ] **v0.4.0 (Plugin Store)**: 提交至官方 CLIProxyAPI Plugins Store，支持管理面板一键无缝安装。
 
 ---
