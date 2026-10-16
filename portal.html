@@ -145,6 +145,33 @@ button.btn-query:hover { background: var(--accent-hover); }
   color: var(--text);
   font-family: monospace;
 }
+.token-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 10px 0 6px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.token-col {
+  text-align: center;
+}
+.token-col-mid {
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+.token-lbl {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+.token-val {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: monospace;
+}
 .footer { margin-top: 24px; text-align: center; font-size: 12px; color: var(--muted); }
 .alert { padding: 12px 16px; border-radius: 8px; margin-top: 16px; font-size: 13px; }
 .alert-ok { background: rgba(34, 197, 94, 0.15); color: var(--green); border: 1px solid var(--green); }
@@ -187,6 +214,17 @@ function formatDate(isoStr) {
   } catch(e) {
     return isoStr;
   }
+}
+
+function formatTokensM(tokens) {
+  if (tokens === undefined || tokens === null) return "0.00M";
+  const num = Number(tokens);
+  if (isNaN(num) || num <= 0) return "0.00M";
+  const m = num / 1000000;
+  if (m >= 100) return m.toFixed(1) + "M";
+  if (m >= 1) return m.toFixed(2) + "M";
+  if (m >= 0.01) return m.toFixed(2) + "M";
+  return m.toFixed(3) + "M";
 }
 
 function formatRemaining5h(targetUnixSec) {
@@ -280,7 +318,18 @@ async function doQuery() {
     if (sec.reset_at) {
       html += '<div class="stat-row"><span class="stat-label">📅 周限额度刷新时间</span><span class="stat-val" id="secSchedule" style="color: var(--accent);">' + formatScheduleWeek(sec.reset_at) + '</span></div>';
     }
-    html += '<div class="stat-row"><span class="stat-label">历史总调用</span><span class="stat-val">' + d.local_calls + ' 次 (约 ' + Math.round(d.local_tokens / 1000) + 'k Tokens)</span></div>';
+    const totalTok = d.total_tokens !== undefined ? d.total_tokens : (d.local_tokens || 0);
+    const inputTok = d.input_tokens || 0;
+    const outputTok = d.output_tokens || 0;
+    const cachedTok = d.cached_tokens || 0;
+
+    html += '<div class="stat-row"><span class="stat-label">历史总调用</span><span class="stat-val">' + (d.local_calls || 0) + ' 次 · 总计 ' + formatTokensM(totalTok) + '</span></div>';
+    html += '<div class="token-grid">';
+    html += '<div class="token-col"><div class="token-lbl">输入 (Input)</div><div class="token-val" style="color:var(--text);">' + formatTokensM(inputTok) + '</div></div>';
+    html += '<div class="token-col token-col-mid"><div class="token-lbl">输出 (Output)</div><div class="token-val" style="color:var(--accent);">' + formatTokensM(outputTok) + '</div></div>';
+    html += '<div class="token-col"><div class="token-lbl">缓存读取 (Hit)</div><div class="token-val" style="color:var(--green);">' + formatTokensM(cachedTok) + '</div></div>';
+    html += '</div>';
+
     html += '<div class="stat-row"><span class="stat-label">可用撞墙重置卡</span><span class="stat-val" style="color: var(--orange);">' + credCount + ' 张</span></div>';
     html += '</div>';
 
