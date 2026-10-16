@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -17,8 +18,11 @@ type routingTable struct {
 	// rejects every request: buyers cannot be told apart from other callers, and
 	// letting them through would expose the whole account pool.
 	configErr error
-	byKey     map[string]*seat
-	byScope   map[string]*seat
+	// publicBaseURL is the normalized public-base-url, without a trailing slash.
+	publicBaseURL string
+	seats         []*seat // in configuration order
+	byKey         map[string]*seat
+	byScope       map[string]*seat
 }
 
 // seat is one compiled buyer entry.
@@ -30,6 +34,9 @@ type seat struct {
 	// matchIDs are the normalized Auth IDs, used to match scheduler candidates.
 	matchIDs []string
 	expireAt time.Time // zero when the seat never expires
+	// maxConcurrency and rpm are the effective limits; 0 means unlimited.
+	maxConcurrency int
+	rpm            int
 }
 
 func (s *seat) expired(now time.Time) bool {
@@ -46,13 +53,39 @@ func compileRouting(cfg PluginConfig) (*routingTable, error) {
 		return table, nil
 	}
 
+	baseURL, err := normalizePublicBaseURL(cfg.PublicBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	table.publicBaseURL = baseURL
+	if cfg.MaxConcurrency < 0 || cfg.RPM < 0 {
+		return nil, fmt.Errorf("max-concurrency and rpm must not be negative (0 means unlimited)")
+	}
+
+	names := make(map[string]int)
 	for i := range cfg.Users {
 		user := &cfg.Users[i]
 		user.Name = strings.TrimSpace(user.Name)
 		if user.Name == "" {
 			user.Name = fmt.Sprintf("seat-%d", i+1)
 		}
+		// Seat names identify seats in the limiter, the logs and the admin page.
+		if prev, dup := names[user.Name]; dup {
+			return nil, fmt.Errorf("users[%d]: seat name %q is already used by users[%d]", i, user.Name, prev)
+		}
+		names[user.Name] = i
 		s := &seat{user: user}
+
+		s.maxConcurrency, s.rpm = cfg.MaxConcurrency, cfg.RPM
+		if user.MaxConcurrency != nil {
+			s.maxConcurrency = *user.MaxConcurrency
+		}
+		if user.RPM != nil {
+			s.rpm = *user.RPM
+		}
+		if s.maxConcurrency < 0 || s.rpm < 0 {
+			return nil, fmt.Errorf("users[%d] (%s): max-concurrency and rpm must not be negative (0 means unlimited)", i, user.Name)
+		}
 
 		for _, a := range user.Primary {
 			a = strings.TrimSpace(a)
@@ -89,9 +122,23 @@ func compileRouting(cfg PluginConfig) (*routingTable, error) {
 		if keys == 0 {
 			return nil, fmt.Errorf("users[%d] (%s): api-keys must list at least one key", i, user.Name)
 		}
+		table.seats = append(table.seats, s)
 	}
 
 	return table, nil
+}
+
+// normalizePublicBaseURL checks public-base-url and strips its trailing slash.
+func normalizePublicBaseURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("public-base-url must be an http(s) URL without credentials, query or fragment, e.g. https://api.example.com")
+	}
+	return strings.TrimRight(raw, "/"), nil
 }
 
 // normalizeAuthID canonicalizes an Auth ID for matching only. CPA uses the auth

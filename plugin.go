@@ -25,11 +25,14 @@ type registrationPayload struct {
 type registrationCapability struct {
 	Scheduler                 bool `json:"scheduler"`
 	SchedulerAcrossPriorities bool `json:"scheduler_across_priorities"`
+	RequestInterceptor        bool `json:"request_interceptor"`
+	RequestLifecyclePlugin    bool `json:"request_lifecycle_plugin"`
 	ManagementAPI             bool `json:"management_api"`
 }
 
 type lifecycleRequest struct {
-	ConfigYAML []byte `json:"config_yaml"`
+	ConfigYAML    []byte `json:"config_yaml"`
+	SchemaVersion uint32 `json:"schema_version"`
 }
 
 func handleMethod(method string, request []byte) ([]byte, error) {
@@ -40,6 +43,15 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 
 	case pluginabi.MethodSchedulerPick:
 		return pickAuth(request, activeTable.Load())
+
+	case pluginabi.MethodRequestInterceptBefore:
+		return interceptBeforeAuth(request, activeTable.Load())
+
+	case pluginabi.MethodRequestInterceptAfter:
+		return passThrough()
+
+	case pluginabi.MethodRequestComplete:
+		return completeRequest(request)
 
 	case pluginabi.MethodManagementRegister:
 		// CPA serves plugin resources for GET only, and only on the exact paths
@@ -90,9 +102,8 @@ func configure(raw []byte) {
 	activeTable.Store(table)
 }
 
-// loadConfig decodes the plugin's own section of config.yaml. CPA passes only the
-// plugins.configs.<plugin-id> subtree, not the whole file. Decoding is strict so a
-// misspelled key (e.g. api_keys) fails loudly instead of silently dropping a seat.
+// loadConfig decodes the lifecycle request of plugin.register / plugin.reconfigure
+// and the configuration it carries.
 func loadConfig(raw []byte) (PluginConfig, *routingTable, error) {
 	var req lifecycleRequest
 	if len(raw) > 0 {
@@ -100,10 +111,17 @@ func loadConfig(raw []byte) (PluginConfig, *routingTable, error) {
 			return PluginConfig{}, nil, fmt.Errorf("decode lifecycle request: %w", err)
 		}
 	}
+	noteHostSchema(req.SchemaVersion)
+	return parseConfig(req.ConfigYAML)
+}
 
+// parseConfig decodes the plugin's own section of config.yaml. CPA passes only the
+// plugins.configs.<plugin-id> subtree, not the whole file. Decoding is strict so a
+// misspelled key (e.g. api_keys) fails loudly instead of silently dropping a seat.
+func parseConfig(configYAML []byte) (PluginConfig, *routingTable, error) {
 	var cfg PluginConfig
-	if len(bytes.TrimSpace(req.ConfigYAML)) > 0 {
-		dec := yaml.NewDecoder(bytes.NewReader(req.ConfigYAML))
+	if len(bytes.TrimSpace(configYAML)) > 0 {
+		dec := yaml.NewDecoder(bytes.NewReader(configYAML))
 		dec.KnownFields(true)
 		if err := dec.Decode(&cfg); err != nil {
 			return PluginConfig{}, nil, fmt.Errorf("parse config: %w", err)
@@ -117,9 +135,19 @@ func loadConfig(raw []byte) (PluginConfig, *routingTable, error) {
 	return cfg, table, nil
 }
 
+// noteHostSchema records whether the host sends request.complete, without which
+// concurrency slots could never be freed.
+func noteHostSchema(version uint32) {
+	legacy := version < 2
+	if legacy && !legacyHost.Load() {
+		logf("warn", "host plugin schema version %d does not report request completion; max-concurrency is not enforced (rpm still is)", version)
+	}
+	legacyHost.Store(legacy)
+}
+
 func pluginRegistration() registrationPayload {
 	return registrationPayload{
-		SchemaVersion: 1,
+		SchemaVersion: PluginSchemaVersion,
 		Metadata: pluginapi.Metadata{
 			Name:             "cpa-plugin-carpool",
 			Version:          PluginVersion,
@@ -129,6 +157,8 @@ func pluginRegistration() registrationPayload {
 		Capabilities: registrationCapability{
 			Scheduler:                 true,
 			SchedulerAcrossPriorities: true,
+			RequestInterceptor:        true,
+			RequestLifecyclePlugin:    true,
 			ManagementAPI:             true,
 		},
 	}

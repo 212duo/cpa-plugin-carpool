@@ -172,6 +172,69 @@ button.btn-query:hover { background: var(--accent-hover); }
   font-weight: 600;
   font-family: monospace;
 }
+.guide-sec {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--border);
+}
+.sec-title { font-size: 14px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+.sec-desc { font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.5; }
+.guide-field { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 13px; }
+.guide-field label { color: var(--muted); width: 64px; flex-shrink: 0; }
+.guide-field code, .guide-field select, .guide-field input {
+  flex: 1;
+  min-width: 0;
+  background: #0b1120;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-family: monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 10px; }
+.tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 9999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tab.active { border-color: var(--accent); color: var(--accent); background: rgba(56, 189, 248, 0.1); }
+.step { font-size: 12px; color: var(--muted); margin: 12px 0 6px; line-height: 1.5; }
+.code-box { position: relative; }
+.code-box pre {
+  background: #070d17;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  padding-right: 64px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.copy-btn:hover { border-color: var(--accent); }
+.guide-steps { margin: 6px 0 0 18px; font-size: 13px; line-height: 1.7; color: var(--text); }
+.guide-steps li { margin-bottom: 6px; }
+.guide-note { font-size: 12px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
 .footer { margin-top: 24px; text-align: center; font-size: 12px; color: var(--muted); }
 .alert { padding: 12px 16px; border-radius: 8px; margin-top: 16px; font-size: 13px; }
 .alert-ok { background: rgba(34, 197, 94, 0.15); color: var(--green); border: 1px solid var(--green); }
@@ -342,6 +405,9 @@ async function doQuery() {
     if (d.expires_at) {
       html += '<div class="stat-row"><span class="stat-label">租期到期</span><span class="stat-val">' + esc(formatDate(d.expires_at)) + '</span></div>';
     }
+    const lim = d.limits || {};
+    html += '<div class="stat-row"><span class="stat-label">并发请求</span><span class="stat-val">' + esc(formatLimit(lim.active, lim.max_concurrency)) + '</span></div>';
+    html += '<div class="stat-row"><span class="stat-label">近 1 分钟请求</span><span class="stat-val">' + esc(formatLimit(lim.recent_requests, lim.rpm)) + '</span></div>';
     if (quotaSupported) {
       html += '<div class="stat-row"><span class="stat-label">5小时滚动已用</span><span class="stat-val">' + esc(pri.used_percent !== undefined ? pri.used_percent + "%" : "0%") + '</span></div>';
       if (pri.reset_at) {
@@ -412,14 +478,198 @@ async function doQuery() {
       html += '</div>';
     }
 
+    html += '<div class="guide-sec" id="guideSec"></div>';
+
     area.innerHTML = html;
     if (pri.reset_at || sec.reset_at) {
       startCountdown(pri.reset_at, sec.reset_at);
     }
+    setupGuide(d);
   } catch(e) {
     area.innerHTML = '<div class="alert alert-err">网络错误：' + esc(e.message) + '</div>';
   }
 }
+
+function formatLimit(used, limit) {
+  const u = Number(used) || 0;
+  return Number(limit) > 0 ? u + " / " + limit : u + "（不限）";
+}
+
+// ---- Client setup guide -------------------------------------------------
+// Everything is rendered client-side from the gateway address, the buyer's own key
+// and a model picked from /v1/models; nothing new is sent to the server.
+
+// The gateway root is the part of the path before /v0/resource/plugins/, so the
+// guide still works when CPA sits under a reverse-proxy path prefix.
+const gatewayRoot = window.location.pathname.split("/v0/resource/plugins/")[0].replace(/\/+$/, "");
+
+const guide = { tab: "codex", base: "", models: [], model: "", provider: "", blocks: [] };
+
+// Model hints per seat type: models whose id or owner matches are listed first.
+const providerHints = {
+  codex: ["gpt", "codex", "openai"],
+  claude: ["claude", "anthropic"],
+  gemini: ["gemini", "google"],
+  "gemini-cli": ["gemini", "google"],
+  vertex: ["gemini", "google"],
+  aistudio: ["gemini", "google"],
+  antigravity: ["gemini", "claude", "google"],
+  qwen: ["qwen"],
+};
+
+function modelMatches(m, provider) {
+  const hints = providerHints[provider] || [];
+  const text = (String(m.id || "") + " " + String(m.owned_by || "")).toLowerCase();
+  return hints.some((h) => text.includes(h));
+}
+
+async function loadModels() {
+  try {
+    const res = await fetch(gatewayRoot + "/v1/models", {
+      cache: "no-store",
+      headers: { "Authorization": "Bearer " + currentKey }
+    });
+    if (!res.ok) return [];
+    const body = await res.json();
+    const list = Array.isArray(body.data) ? body.data : [];
+    return list.filter((m) => m && typeof m.id === "string" && m.id);
+  } catch (e) {
+    return [];
+  }
+}
+
+async function setupGuide(status) {
+  guide.base = (status.public_base_url || (window.location.origin + gatewayRoot)).replace(/\/+$/, "");
+  guide.provider = status.provider || "";
+  renderGuide();
+  const models = await loadModels();
+  const matched = models.filter((m) => modelMatches(m, guide.provider));
+  const rest = models.filter((m) => !modelMatches(m, guide.provider));
+  guide.models = matched.concat(rest).map((m) => m.id);
+  if (!guide.model || !guide.models.includes(guide.model)) {
+    guide.model = guide.models[0] || "";
+  }
+  renderGuide();
+}
+
+function tomlStr(s) { return JSON.stringify(String(s)); }
+function shStr(s) { return '"' + String(s).replace(/[\\"$`]/g, "\\$&") + '"'; }
+
+function guideTemplates() {
+  const base = guide.base, key = currentKey, model = guide.model || "<模型名>";
+  return {
+    codex: [
+      { step: "1. 编辑 ~/.codex/config.toml（Windows 为 %USERPROFILE%\\.codex\\config.toml），已有 model / model_provider 时替换掉：",
+        code: "model_provider = \"carpool\"\nmodel = " + tomlStr(model) + "\n\n[model_providers.carpool]\nname = \"CPA Carpool\"\nbase_url = " + tomlStr(base + "/v1") + "\nwire_api = \"responses\"\nenv_key = \"CARPOOL_API_KEY\"" },
+      { step: "2. 设置环境变量。macOS / Linux 写进 ~/.zshrc 或 ~/.bashrc：",
+        code: "export CARPOOL_API_KEY=" + shStr(key) },
+      { step: "Windows（PowerShell 或 CMD，执行后重新打开终端）：",
+        code: "setx CARPOOL_API_KEY \"" + key + "\"" },
+    ],
+    claude: [
+      { step: "写入 ~/.claude/settings.json（已有内容时只合并 env 部分）：",
+        code: JSON.stringify({ env: {
+          ANTHROPIC_BASE_URL: base,
+          ANTHROPIC_AUTH_TOKEN: key,
+          ANTHROPIC_MODEL: model,
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
+        } }, null, 2),
+        note: "ANTHROPIC_DEFAULT_HAIKU_MODEL 让后台小任务也使用这个模型，避免请求到席位不支持的模型。席位不是 Claude 账号时，CPA 会把 Claude 协议的请求转换后发给席位账号。" },
+    ],
+    cursor: [
+      { steps: [
+          "打开 Cursor Settings → Models。",
+          "在 API Keys 的 OpenAI API Key 中填入你的 key：",
+          "打开 Override OpenAI Base URL，填入：",
+          "点击 Add Custom Model 添加模型，保存后点击 Verify：",
+        ],
+        values: [null, key, base + "/v1", model],
+        note: "Cursor 通过它自己的服务器转发请求，接口地址必须能从公网通过 HTTPS 访问；只在内网可达的网关无法用于 Cursor。" },
+    ],
+    generic: [
+      { step: "任何 OpenAI 兼容客户端：Base URL 填 " + base + "/v1，API Key 填你的 key。用下面的命令测试连通性：",
+        code: "curl " + base + "/v1/chat/completions \\\n  -H " + shStr("Authorization: Bearer " + key) + " \\\n  -H \"Content-Type: application/json\" \\\n  -d '" + JSON.stringify({ model: model, messages: [{ role: "user", content: "ping" }] }) + "'" },
+    ],
+  };
+}
+
+function codeBlock(text) {
+  guide.blocks.push(text);
+  return '<div class="code-box"><pre>' + esc(text) + '</pre><button class="copy-btn" data-copy="' + (guide.blocks.length - 1) + '">复制</button></div>';
+}
+
+function renderGuide() {
+  const sec = document.getElementById("guideSec");
+  if (!sec) return;
+  guide.blocks = [];
+  const tabs = [["codex", "Codex CLI"], ["claude", "Claude Code"], ["cursor", "Cursor"], ["generic", "OpenAI 兼容 / curl"]];
+
+  let html = '<div class="sec-title">客户端接入</div>';
+  html += '<div class="sec-desc">下面的配置已经填好了网关地址和你的 key，复制即可使用。请勿把含 key 的配置分享给他人。</div>';
+  html += '<div class="guide-field"><label>接口地址</label><code>' + esc(guide.base) + '</code></div>';
+  html += '<div class="guide-field"><label>模型</label>';
+  if (guide.models.length > 0) {
+    html += '<select id="guideModel">' + guide.models.map((id) =>
+      '<option value="' + esc(id) + '"' + (id === guide.model ? " selected" : "") + '>' + esc(id) + '</option>').join("") + '</select>';
+  } else {
+    html += '<input type="text" id="guideModel" placeholder="填写要使用的模型名" value="' + esc(guide.model) + '" spellcheck="false">';
+  }
+  html += '</div>';
+
+  html += '<div class="tabs">' + tabs.map(([id, label]) =>
+    '<button class="tab' + (id === guide.tab ? " active" : "") + '" data-tab="' + id + '">' + esc(label) + '</button>').join("") + '</div>';
+
+  (guideTemplates()[guide.tab] || []).forEach((b) => {
+    if (b.steps) {
+      html += '<ol class="guide-steps">';
+      b.steps.forEach((s, i) => {
+        html += '<li>' + esc(s) + (b.values[i] ? codeBlock(b.values[i]) : '') + '</li>';
+      });
+      html += '</ol>';
+    } else {
+      html += '<div class="step">' + esc(b.step) + '</div>' + codeBlock(b.code);
+    }
+    if (b.note) html += '<div class="guide-note">' + esc(b.note) + '</div>';
+  });
+  sec.innerHTML = html;
+}
+
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    // Clipboard API needs HTTPS; fall back to a temporary textarea.
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e2) {}
+    ta.remove();
+  }
+  const old = btn.textContent;
+  btn.textContent = "已复制";
+  setTimeout(() => { btn.textContent = old; }, 1500);
+}
+
+document.addEventListener("click", (ev) => {
+  const tab = ev.target.closest && ev.target.closest(".tab[data-tab]");
+  if (tab) {
+    guide.tab = tab.dataset.tab;
+    renderGuide();
+    return;
+  }
+  const btn = ev.target.closest && ev.target.closest(".copy-btn[data-copy]");
+  if (btn) {
+    copyText(guide.blocks[Number(btn.dataset.copy)] || "", btn);
+  }
+});
+
+document.addEventListener("change", (ev) => {
+  if (ev.target && ev.target.id === "guideModel") {
+    guide.model = ev.target.value.trim();
+    renderGuide();
+  }
+});
 
 async function doReset() {
   if (!currentKey) return;

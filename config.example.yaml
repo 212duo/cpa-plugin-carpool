@@ -31,14 +31,27 @@ plugins:
       # 可选：请求 ChatGPT 额度接口时使用的 User-Agent，留空使用内置默认值。
       upstream-user-agent: ""
 
+      # 可选：客户端访问网关用的地址，Portal 的「客户端接入」配置模板会用它。
+      # 留空时使用买家打开 Portal 的地址。
+      public-base-url: ""
+
+      # 可选：每个席位的默认限额，席位里没写时使用；0 表示不限。
+      # max-concurrency 是同时进行中的请求数，rpm 是每分钟最多发起的请求数。
+      # 超过时直接返回 429 和 Retry-After，客户端会自动退避重试。
+      max-concurrency: 0
+      rpm: 0
+
       users:
-        - name: "TeamA-席位1"                 # 买家在 Portal 上看到的名字
+        - name: "TeamA-席位1"                 # 买家在 Portal 上看到的名字，不能重复
           api-keys: ["sk-buyer-alice-change-me"]
           # CPA 中的账号 ID：auth 目录下的文件路径（含子目录），大小写和 .json 后缀可省略。
           # 可以写多个，调度时按 CPA 优先级选；Portal 显示第一个已加载的。
           primary: ["codex-xxxxxxxx-a1@example.com-team.json"]
           # 可选：RFC3339 格式的到期时间，过期后该席位的 key 一律被拒绝。
           expire-at: "2026-11-15T23:59:59+08:00"
+          # 可选：覆盖默认限额。同一席位的多个 key 共享这些限额。
+          max-concurrency: 2
+          rpm: 30
 
         - name: "TeamA-席位2"
           api-keys:                           # 一个席位可以发多个 key
@@ -49,5 +62,7 @@ plugins:
 # 校验规则（任何一条不满足，插件都会拒绝所有请求并在 CPA 日志里打印原因）：
 #   - 字段名必须拼写正确（例如 api_keys 会被当作错误，而不是被忽略）
 #   - 每个席位至少有一个 api-keys 和一个 primary
-#   - 同一个 key 不能分配给两个席位
+#   - 同一个 key 不能分配给两个席位，席位名（含留空时生成的 seat-N）不能重复
 #   - expire-at 必须是 RFC3339 格式
+#   - max-concurrency、rpm 不能是负数
+#   - public-base-url 必须是不带查询参数的 http(s) 地址

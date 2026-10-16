@@ -13,7 +13,7 @@ set -e
 REPO=$(cd "$(dirname "$0")" && pwd)
 IMAGE=${GO_IMAGE:-golang:1.26-bookworm}
 
-CMD='go build -buildmode=c-shared -trimpath -ldflags="-s -w" -o out/cpa-carpool.so . && rm -f out/cpa-carpool.h'
+CMD='go build -buildmode=c-shared -trimpath -ldflags="-s -w" -buildvcs=false -o out/cpa-carpool.so . && rm -f out/cpa-carpool.h'
 [ "$1" = "test" ] && CMD="go vet ./... && go test -count=1 ./... && $CMD"
 
 mkdir -p "$REPO/out"

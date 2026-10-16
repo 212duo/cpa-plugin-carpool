@@ -6,7 +6,13 @@ import (
 )
 
 // PluginVersion is the semantic release version of the carpool plugin.
-const PluginVersion = "0.2.0"
+const PluginVersion = "0.3.0"
+
+// PluginSchemaVersion is the RPC contract version declared at plugin.register.
+// Version 2 adds request.complete, which the concurrency limit needs; version 6
+// keeps management JSON responses unescaped. Pinned rather than taken from the SDK
+// so an SDK upgrade cannot silently opt into a newer contract.
+const PluginSchemaVersion = 6
 
 // DefaultUpstreamUserAgent is sent to the ChatGPT quota endpoints unless
 // upstream-user-agent overrides it.
@@ -44,14 +50,24 @@ type EnvelopeError struct {
 //	      debug: false
 //	      db-path: "/opt/cpa/manager-data/usage.sqlite" # optional, auto-detected
 //	      upstream-user-agent: ""                       # optional
+//	      public-base-url: "https://api.example.com"    # optional
+//	      max-concurrency: 0                            # optional default per seat
+//	      rpm: 0                                        # optional default per seat
 //	      users: [...]
 type PluginConfig struct {
 	Enabled bool   `yaml:"enabled" json:"enabled"`
 	Debug   bool   `yaml:"debug" json:"debug"`
 	DBPath  string `yaml:"db-path" json:"db-path"`
 	// UpstreamUserAgent overrides DefaultUpstreamUserAgent for ChatGPT quota calls.
-	UpstreamUserAgent string       `yaml:"upstream-user-agent" json:"upstream-user-agent"`
-	Users             []UserConfig `yaml:"users" json:"users"`
+	UpstreamUserAgent string `yaml:"upstream-user-agent" json:"upstream-user-agent"`
+	// PublicBaseURL is the address clients use to reach the gateway, shown in the
+	// portal's client setup guide. Empty means the origin the portal was opened on.
+	PublicBaseURL string `yaml:"public-base-url" json:"public-base-url"`
+	// MaxConcurrency and RPM are the limits of seats that do not set their own;
+	// 0 means unlimited.
+	MaxConcurrency int          `yaml:"max-concurrency" json:"max-concurrency"`
+	RPM            int          `yaml:"rpm" json:"rpm"`
+	Users          []UserConfig `yaml:"users" json:"users"`
 
 	// Priority and Store are read by CPA itself. They are declared only so that
 	// strict decoding accepts them.
@@ -71,6 +87,10 @@ type UserConfig struct {
 	// ExpireAt optionally specifies an RFC3339 timestamp (e.g. "2026-11-15T23:59:59+08:00")
 	// after which the keys are rejected.
 	ExpireAt string `yaml:"expire-at,omitempty" json:"expire-at,omitempty"`
+	// MaxConcurrency and RPM limit the seat as a whole: all of its keys share them.
+	// Unset inherits the top-level value; 0 means unlimited.
+	MaxConcurrency *int `yaml:"max-concurrency,omitempty" json:"max-concurrency,omitempty"`
+	RPM            *int `yaml:"rpm,omitempty" json:"rpm,omitempty"`
 }
 
 // TokenStats holds the detailed M-level token usage for an API key.
@@ -92,9 +112,24 @@ type ResetCreditItem struct {
 	RedeemedAt *string `json:"redeemed_at,omitempty"`
 }
 
+// SeatLimits reports a seat's request limits and its current use of them.
+type SeatLimits struct {
+	MaxConcurrency int `json:"max_concurrency"` // 0 = unlimited
+	RPM            int `json:"rpm"`             // 0 = unlimited
+	Active         int `json:"active"`          // requests in flight
+	RecentRequests int `json:"recent_requests"` // requests started in the last minute
+}
+
 // BuyerStatusResponse is the sanitized, zero-trust response returned to the buyer portal.
 type BuyerStatusResponse struct {
 	SeatName string `json:"seat_name"`
+	// Provider is the seat account's type (codex, claude, ...), used by the portal
+	// to suggest models in the client setup guide.
+	Provider string `json:"provider,omitempty"`
+	// PublicBaseURL is the configured gateway address for client setup; empty means
+	// the portal's own origin.
+	PublicBaseURL string     `json:"public_base_url,omitempty"`
+	Limits        SeatLimits `json:"limits"`
 	// QuotaSupported is false when the seat is not a Codex account; quota windows
 	// and reset credits are then unavailable.
 	QuotaSupported   bool              `json:"quota_supported"`

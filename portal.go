@@ -112,11 +112,15 @@ func handleAPIStatus(req pluginapi.ManagementRequest, table *routingTable, cfg P
 		return jsonResponse(http.StatusServiceUnavailable, map[string]string{"error": "Seat account is not available in the gateway, please contact the host"})
 	}
 
+	now := time.Now()
 	resp := BuyerStatusResponse{
 		SeatName:       buyer.user.Name,
+		Provider:       authProvider(entry),
+		PublicBaseURL:  table.publicBaseURL,
+		Limits:         seatLimits(buyer, now),
 		QuotaSupported: supportsUpstreamQuota(entry),
 		UpstreamUsage:  map[string]any{},
-		IsCooling:      isCooling(entry.AuthIndex, time.Now()),
+		IsCooling:      isCooling(entry.AuthIndex, now),
 	}
 	if !buyer.expireAt.IsZero() {
 		resp.ExpiresAt = &buyer.expireAt

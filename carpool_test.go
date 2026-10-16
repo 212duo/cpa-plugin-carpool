@@ -43,7 +43,7 @@ const base = "/v0/resource/plugins/cpa-carpool"
 
 func mustConfigure(t *testing.T, yamlText string) {
 	t.Helper()
-	raw, err := json.Marshal(lifecycleRequest{ConfigYAML: []byte(yamlText)})
+	raw, err := json.Marshal(lifecycleRequest{ConfigYAML: []byte(yamlText), SchemaVersion: PluginSchemaVersion})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,8 +627,7 @@ func TestConfigExampleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lifecycle, _ := json.Marshal(lifecycleRequest{ConfigYAML: sectionYAML})
-	cfg, table, err := loadConfig(lifecycle)
+	cfg, table, err := parseConfig(sectionYAML)
 	if err != nil {
 		t.Fatalf("config.example.yaml is rejected: %v", err)
 	}

@@ -118,7 +118,9 @@ func cliproxyPluginFree(ptr unsafe.Pointer, len C.size_t) {
 }
 
 //export cliproxyPluginShutdown
-func cliproxyPluginShutdown() {}
+func cliproxyPluginShutdown() {
+	limiter.reset()
+}
 
 func writeResponse(buf *C.cliproxy_buffer, payload []byte) {
 	if buf == nil || len(payload) == 0 {

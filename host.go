@@ -114,3 +114,11 @@ func resetCooldown(authIndex string) error {
 func supportsUpstreamQuota(entry pluginapi.HostAuthFileEntry) bool {
 	return strings.EqualFold(entry.Type, "codex") || strings.EqualFold(entry.Provider, "codex")
 }
+
+// authProvider names the auth's provider type in lower case, e.g. "codex".
+func authProvider(entry pluginapi.HostAuthFileEntry) string {
+	if p := strings.TrimSpace(entry.Provider); p != "" {
+		return strings.ToLower(p)
+	}
+	return strings.ToLower(strings.TrimSpace(entry.Type))
+}
