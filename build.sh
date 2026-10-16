@@ -1,26 +1,26 @@
 #!/bin/sh
-# Builds cpa-carpool.so for linux/amd64 in Docker (golang:1.26-bookworm)
-# matching the official CLIProxyAPI toolchain and libc.
+# Builds cpa-carpool.so in Docker with golang:1.26-bookworm, the same toolchain and
+# glibc as the official CLIProxyAPI image (debian:bookworm).
 #
 # Usage: ./build.sh [test]        Output: out/cpa-carpool.so
+#
+#   test               also run go vet and the unit tests before building
+#   PLATFORM=...       target platform, e.g. linux/arm64 (default: the Docker host's;
+#                      a foreign platform needs QEMU emulation in Docker)
+#   GO_IMAGE=...       override the build image
 set -e
 
 REPO=$(cd "$(dirname "$0")" && pwd)
-PARENT=$(dirname "$REPO")
-NAME=$(basename "$REPO")
-CPA_VERSION=${CPA_VERSION:-v8.0.30}
+IMAGE=${GO_IMAGE:-golang:1.26-bookworm}
 
-CMD='go mod tidy && go build -buildmode=c-shared -trimpath -ldflags="-s -w" -o out/cpa-carpool.so . && rm -f out/cpa-carpool.h'
-[ "$1" = "test" ] && CMD="go mod tidy && go vet ./... && go test -count=1 ./... && $CMD"
-
-if [ ! -d "$PARENT/CLIProxyAPI" ]; then
-  CMD="git clone -q --depth 1 --branch $CPA_VERSION https://github.com/router-for-me/CLIProxyAPI /work/CLIProxyAPI && $CMD"
-fi
+CMD='go build -buildmode=c-shared -trimpath -ldflags="-s -w" -o out/cpa-carpool.so . && rm -f out/cpa-carpool.h'
+[ "$1" = "test" ] && CMD="go vet ./... && go test -count=1 ./... && $CMD"
 
 mkdir -p "$REPO/out"
-docker run --rm \
-  -v "$PARENT:/work" \
+# shellcheck disable=SC2086
+docker run --rm ${PLATFORM:+--platform "$PLATFORM"} \
+  -v "$REPO:/src" \
   -v cpa-carpool-gomod:/go/pkg/mod -v cpa-carpool-gocache:/root/.cache/go-build \
-  -w "/work/$NAME" golang:1.26-bookworm sh -c "$CMD"
+  -w /src "$IMAGE" sh -c "$CMD"
 
 ls -lh "$REPO/out/cpa-carpool.so"

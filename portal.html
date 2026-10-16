@@ -184,19 +184,49 @@ button.btn-query:hover { background: var(--accent-hover); }
   <p class="desc">输入你的专属客户端 API Key，查询席位额度状态及核销重置卡</p>
   
   <div class="form-group">
-    <input type="text" id="apiKeyInput" placeholder="输入 sk-team..." value="">
+    <input type="text" id="apiKeyInput" placeholder="输入 sk-team..." value="" autocomplete="off" spellcheck="false">
     <button class="btn-query" onclick="doQuery()">查询</button>
   </div>
 
   <div id="resultArea"></div>
 </div>
 
-<div class="footer">CPA Enterprise Multi-Tenant Gateway</div>
+<div class="footer">社区插件 · 非 CLIProxyAPI 官方项目</div>
 
 <script>
+// The buyer key travels in the X-Carpool-Key header, never in API URLs, so it stays
+// out of gateway access logs. Share links should use #key=... (the fragment is not
+// sent to the server); ?key=... still works but is removed from the address bar.
+let currentKey = "";
+
 function getUrlKey() {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("key") || "";
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const query = new URLSearchParams(window.location.search);
+  const key = hash.get("key") || query.get("key") || "";
+  if (key && (window.location.search || window.location.hash)) {
+    history.replaceState(null, "", window.location.pathname);
+  }
+  return key;
+}
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[ch]);
+}
+
+async function api(path) {
+  const res = await fetch(path, {
+    cache: "no-store",
+    headers: { "X-Carpool-Key": currentKey }
+  });
+  let data = {};
+  try {
+    data = await res.json();
+  } catch (e) {
+    data = { error: "网关返回了无法解析的响应 (HTTP " + res.status + ")" };
+  }
+  return { res, data };
 }
 
 function formatDate(isoStr) {
@@ -222,7 +252,6 @@ function formatTokensM(tokens) {
   if (isNaN(num) || num <= 0) return "0.00M";
   const m = num / 1000000;
   if (m >= 100) return m.toFixed(1) + "M";
-  if (m >= 1) return m.toFixed(2) + "M";
   if (m >= 0.01) return m.toFixed(2) + "M";
   return m.toFixed(3) + "M";
 }
@@ -281,22 +310,22 @@ window.onload = function() {
 };
 
 async function doQuery() {
-  const key = document.getElementById("apiKeyInput").value.trim();
+  currentKey = document.getElementById("apiKeyInput").value.trim();
   const area = document.getElementById("resultArea");
-  if (!key) {
+  if (!currentKey) {
     area.innerHTML = '<div class="alert alert-err">请输入有效的 API Key</div>';
     return;
   }
   area.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--muted);">正在连接网关查询真实状态...</div>';
 
   try {
-    const res = await fetch("api/status?key=" + encodeURIComponent(key));
-    const d = await res.json();
+    const { res, data: d } = await api("api/status");
     if (!res.ok || d.error) {
-      area.innerHTML = '<div class="alert alert-err">查询失败：' + (d.error || "未找到此 Key") + '</div>';
+      area.innerHTML = '<div class="alert alert-err">查询失败：' + esc(d.error || "未找到此 Key") + '</div>';
       return;
     }
 
+    const quotaSupported = d.quota_supported !== false;
     const pri = d.upstream_usage?.rate_limit?.primary_window || {};
     const sec = d.upstream_usage?.rate_limit?.secondary_window || {};
     const credCount = d.credits_available ?? 0;
@@ -308,102 +337,108 @@ async function doQuery() {
     }
 
     let html = '<div class="status-card">';
-    html += '<div class="stat-row"><span class="stat-label">绑定席位</span><span class="stat-val">' + d.seat_name + '</span></div>';
+    html += '<div class="stat-row"><span class="stat-label">绑定席位</span><span class="stat-val">' + esc(d.seat_name) + '</span></div>';
     html += '<div class="stat-row"><span class="stat-label">网关状态</span><span class="stat-val">' + statusBadge + '</span></div>';
-    html += '<div class="stat-row"><span class="stat-label">5小时滚动已用</span><span class="stat-val">' + (pri.used_percent !== undefined ? pri.used_percent + "%" : "0%") + '</span></div>';
-    if (pri.reset_at) {
-      html += '<div class="stat-row"><span class="stat-label">⏱️ 5小时额度刷新倒计时</span><span class="stat-val" id="priCountdown" style="color: var(--accent);">' + formatRemaining5h(pri.reset_at) + '</span></div>';
+    if (d.expires_at) {
+      html += '<div class="stat-row"><span class="stat-label">租期到期</span><span class="stat-val">' + esc(formatDate(d.expires_at)) + '</span></div>';
     }
-    html += '<div class="stat-row"><span class="stat-label">周限额已用</span><span class="stat-val">' + (sec.used_percent !== undefined ? sec.used_percent + "%" : "0%") + '</span></div>';
-    if (sec.reset_at) {
-      html += '<div class="stat-row"><span class="stat-label">📅 周限额度刷新时间</span><span class="stat-val" id="secSchedule" style="color: var(--accent);">' + formatScheduleWeek(sec.reset_at) + '</span></div>';
+    if (quotaSupported) {
+      html += '<div class="stat-row"><span class="stat-label">5小时滚动已用</span><span class="stat-val">' + esc(pri.used_percent !== undefined ? pri.used_percent + "%" : "0%") + '</span></div>';
+      if (pri.reset_at) {
+        html += '<div class="stat-row"><span class="stat-label">⏱️ 5小时额度刷新倒计时</span><span class="stat-val" id="priCountdown" style="color: var(--accent);">' + formatRemaining5h(pri.reset_at) + '</span></div>';
+      }
+      html += '<div class="stat-row"><span class="stat-label">周限额已用</span><span class="stat-val">' + esc(sec.used_percent !== undefined ? sec.used_percent + "%" : "0%") + '</span></div>';
+      if (sec.reset_at) {
+        html += '<div class="stat-row"><span class="stat-label">📅 周限额度刷新时间</span><span class="stat-val" id="secSchedule" style="color: var(--accent);">' + formatScheduleWeek(sec.reset_at) + '</span></div>';
+      }
+    } else {
+      html += '<div class="stat-row"><span class="stat-label">额度窗口</span><span class="stat-val" style="color: var(--muted);">该席位类型暂不支持额度查询</span></div>';
     }
-    const totalTok = d.total_tokens !== undefined ? d.total_tokens : (d.local_tokens || 0);
+    const totalTok = d.total_tokens || 0;
     const inputTok = d.input_tokens || 0;
     const outputTok = d.output_tokens || 0;
     const cachedTok = d.cached_tokens || 0;
 
-    html += '<div class="stat-row"><span class="stat-label">历史总调用</span><span class="stat-val">' + (d.local_calls || 0) + ' 次 · 总计 ' + formatTokensM(totalTok) + '</span></div>';
+    html += '<div class="stat-row"><span class="stat-label">历史总调用</span><span class="stat-val">' + esc(d.local_calls || 0) + ' 次 · 总计 ' + formatTokensM(totalTok) + '</span></div>';
     html += '<div class="token-grid">';
     html += '<div class="token-col"><div class="token-lbl">输入 (Input)</div><div class="token-val" style="color:var(--text);">' + formatTokensM(inputTok) + '</div></div>';
     html += '<div class="token-col token-col-mid"><div class="token-lbl">输出 (Output)</div><div class="token-val" style="color:var(--accent);">' + formatTokensM(outputTok) + '</div></div>';
     html += '<div class="token-col"><div class="token-lbl">缓存读取 (Hit)</div><div class="token-val" style="color:var(--green);">' + formatTokensM(cachedTok) + '</div></div>';
     html += '</div>';
 
-    html += '<div class="stat-row"><span class="stat-label">可用撞墙重置卡</span><span class="stat-val" style="color: var(--orange);">' + credCount + ' 张</span></div>';
-    html += '</div>';
-
-    html += '<div class="reset-sec">';
-    html += '<button class="reset-btn" ' + (credCount <= 0 ? "disabled" : "") + ' onclick="doReset(\'' + key + '\')">';
-    html += (credCount > 0 ? "⚡ 一键核销重置卡并解除冷却 (剩余 " + credCount + " 次)" : "暂无可用重置卡");
-    html += '</button>';
-    html += '<div style="font-size:12px; color:var(--muted); margin-top:8px; line-height:1.4;">* 说明：当写代码撞限（429 Too Many Requests）时，点击此按钮可立即消耗一张官方重置卡瞬间满血复活。请按需合理使用。</div>';
-
-    const creditsList = d.credits_list || [];
-    if (creditsList.length > 0) {
-      html += '<div style="margin-top: 18px;">';
-      html += '<div style="font-size: 13px; font-weight: 600; color: var(--accent); margin-bottom: 8px;">重置卡使用时间与明细</div>';
-      html += '<div class="credit-list">';
-      creditsList.forEach((c) => {
-        const isRedeemed = c.status === "redeemed" || (c.redeemed_at && c.redeemed_at !== "");
-        const badge = isRedeemed
-          ? '<span class="badge badge-orange">已使用</span>'
-          : '<span class="badge badge-green">可使用</span>';
-
-        html += '<div class="credit-item">';
-        html += '<div class="credit-header">';
-        html += '<span class="credit-title">' + (c.title || "额度重置卡") + '</span>';
-        html += badge;
-        html += '</div>';
-        html += '<div class="credit-meta">';
-        html += '<div><span>发放时间</span><span class="val">' + formatDate(c.granted_at) + '</span></div>';
-        if (isRedeemed) {
-          html += '<div><span style="color:var(--orange);">使用时间</span><span class="val" style="color:var(--orange); font-weight:600;">' + formatDate(c.redeemed_at) + '</span></div>';
-        } else {
-          html += '<div><span>有效期至</span><span class="val" style="color:var(--accent);">' + formatDate(c.expires_at) + '</span></div>';
-        }
-        html += '</div>';
-        html += '</div>';
-      });
-      html += '</div></div>';
-    } else {
-      html += '<div style="font-size: 12px; color: var(--muted); margin-top: 14px; text-align: center;">暂无已发放的重置卡记录</div>';
+    if (quotaSupported) {
+      html += '<div class="stat-row"><span class="stat-label">可用撞墙重置卡</span><span class="stat-val" style="color: var(--orange);">' + esc(credCount) + ' 张</span></div>';
     }
-
     html += '</div>';
+
+    if (quotaSupported) {
+      html += '<div class="reset-sec">';
+      html += '<button class="reset-btn" ' + (credCount <= 0 ? "disabled" : "") + ' onclick="doReset()">';
+      html += (credCount > 0 ? "⚡ 一键核销重置卡并解除冷却 (剩余 " + esc(credCount) + " 次)" : "暂无可用重置卡");
+      html += '</button>';
+      html += '<div style="font-size:12px; color:var(--muted); margin-top:8px; line-height:1.4;">* 说明：当写代码撞限（429 Too Many Requests）时，点击此按钮可立即消耗一张官方重置卡瞬间满血复活。请按需合理使用。</div>';
+
+      const creditsList = d.credits_list || [];
+      if (creditsList.length > 0) {
+        html += '<div style="margin-top: 18px;">';
+        html += '<div style="font-size: 13px; font-weight: 600; color: var(--accent); margin-bottom: 8px;">重置卡使用时间与明细</div>';
+        html += '<div class="credit-list">';
+        creditsList.forEach((c) => {
+          const isRedeemed = c.status === "redeemed" || (c.redeemed_at && c.redeemed_at !== "");
+          const badge = isRedeemed
+            ? '<span class="badge badge-orange">已使用</span>'
+            : '<span class="badge badge-green">可使用</span>';
+
+          html += '<div class="credit-item">';
+          html += '<div class="credit-header">';
+          html += '<span class="credit-title">' + esc(c.title || "额度重置卡") + '</span>';
+          html += badge;
+          html += '</div>';
+          html += '<div class="credit-meta">';
+          html += '<div><span>发放时间</span><span class="val">' + esc(formatDate(c.granted_at)) + '</span></div>';
+          if (isRedeemed) {
+            html += '<div><span style="color:var(--orange);">使用时间</span><span class="val" style="color:var(--orange); font-weight:600;">' + esc(formatDate(c.redeemed_at)) + '</span></div>';
+          } else {
+            html += '<div><span>有效期至</span><span class="val" style="color:var(--accent);">' + esc(formatDate(c.expires_at)) + '</span></div>';
+          }
+          html += '</div>';
+          html += '</div>';
+        });
+        html += '</div></div>';
+      } else {
+        html += '<div style="font-size: 12px; color: var(--muted); margin-top: 14px; text-align: center;">暂无已发放的重置卡记录</div>';
+      }
+
+      html += '</div>';
+    }
 
     area.innerHTML = html;
     if (pri.reset_at || sec.reset_at) {
       startCountdown(pri.reset_at, sec.reset_at);
     }
   } catch(e) {
-    area.innerHTML = '<div class="alert alert-err">网络错误：' + e.message + '</div>';
+    area.innerHTML = '<div class="alert alert-err">网络错误：' + esc(e.message) + '</div>';
   }
 }
 
-async function doReset(key) {
+async function doReset() {
+  if (!currentKey) return;
   if (!confirm("确定要消耗 1 张重置卡立即回满额度吗？")) return;
   const area = document.getElementById("resultArea");
   area.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--orange);">正在调用 OpenAI 上游核销重置卡并同步解除网关冷却...</div>';
 
   try {
-    const res = await fetch("api/reset", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: key })
-    });
-    const d = await res.json();
+    // CPA only routes GET to plugin resources; confirm=1 marks the request as intentional.
+    const { data: d } = await api("api/reset?confirm=1");
     if (d.success) {
-      alert("🎉 重置成功！额度已恢复满血，网关冷却已解除。");
-      doQuery();
+      alert("🎉 " + (d.message || "重置成功"));
     } else {
       alert("重置失败：" + (d.error || "未知原因"));
-      doQuery();
     }
   } catch(e) {
     alert("请求失败：" + e.message);
-    doQuery();
   }
+  doQuery();
 }
 </script>
 </body>

@@ -1,0 +1,53 @@
+# cpa-plugin-carpool 配置示例（CLIProxyAPI v8 的 config.yaml 片段）
+#
+# 只列出与本插件相关的部分，合并进你自己的 config.yaml 即可。
+# 改完后 CPA 重载配置时会把新配置推给插件，一般不需要重启。
+
+# 1. 客户端认证：买家的 key 也必须写在这里，否则请求在调度之前就会被 CPA 拒绝。
+access:
+  api-keys:
+    - "sk-owner-change-me"        # 你自己的 key：不写进 carpool，走 CPA 默认调度
+    - "sk-buyer-alice-change-me"
+    - "sk-buyer-bob-change-me"
+    - "sk-buyer-bob-2-change-me"
+
+# 2. 插件
+plugins:
+  enabled: true
+  dir: "plugins"                  # 把 cpa-carpool.so 放在这里，或 plugins/linux/amd64/ 下
+  configs:
+    cpa-carpool:                  # 必须和 .so 文件名（去掉扩展名和 -v版本号）一致
+      enabled: true
+      priority: 100               # 同时装了别的调度插件时，只有优先级最高的那个生效
+
+      # 可选：输出每次调度的决定（只记录席位名，不记录 key）
+      debug: false
+
+      # 可选：CPA Manager Plus 的用量数据库，用来给买家展示历史 Token 用量。
+      # 留空时依次尝试 /opt/cpa/manager-data/usage.sqlite、manager-data/usage.sqlite、
+      # ../manager-data/usage.sqlite；都不存在则显示为 0。
+      db-path: ""
+
+      # 可选：请求 ChatGPT 额度接口时使用的 User-Agent，留空使用内置默认值。
+      upstream-user-agent: ""
+
+      users:
+        - name: "TeamA-席位1"                 # 买家在 Portal 上看到的名字
+          api-keys: ["sk-buyer-alice-change-me"]
+          # CPA 中的账号 ID：auth 目录下的文件路径（含子目录），大小写和 .json 后缀可省略。
+          # 可以写多个，调度时按 CPA 优先级选；Portal 显示第一个已加载的。
+          primary: ["codex-xxxxxxxx-a1@example.com-team.json"]
+          # 可选：RFC3339 格式的到期时间，过期后该席位的 key 一律被拒绝。
+          expire-at: "2026-11-15T23:59:59+08:00"
+
+        - name: "TeamA-席位2"
+          api-keys:                           # 一个席位可以发多个 key
+            - "sk-buyer-bob-change-me"
+            - "sk-buyer-bob-2-change-me"
+          primary: ["codex-yyyyyyyy-a2@example.com-team.json"]
+
+# 校验规则（任何一条不满足，插件都会拒绝所有请求并在 CPA 日志里打印原因）：
+#   - 字段名必须拼写正确（例如 api_keys 会被当作错误，而不是被忽略）
+#   - 每个席位至少有一个 api-keys 和一个 primary
+#   - 同一个 key 不能分配给两个席位
+#   - expire-at 必须是 RFC3339 格式

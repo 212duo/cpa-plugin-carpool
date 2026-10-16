@@ -12,18 +12,38 @@ import (
 )
 
 type routingTable struct {
-	debug   bool
-	byKey   map[string]*UserConfig
-	byScope map[string]*UserConfig
-	authMap map[*UserConfig][]string
+	debug bool
+	// configErr is set when the configuration could not be loaded. The table then
+	// rejects every request: buyers cannot be told apart from other callers, and
+	// letting them through would expose the whole account pool.
+	configErr error
+	byKey     map[string]*seat
+	byScope   map[string]*seat
 }
 
-func compileRouting(cfg PluginConfig) *routingTable {
+// seat is one compiled buyer entry.
+type seat struct {
+	user *UserConfig
+	// authIDs are the configured Auth IDs verbatim, used to locate auth files
+	// (file names are case-sensitive on Linux).
+	authIDs []string
+	// matchIDs are the normalized Auth IDs, used to match scheduler candidates.
+	matchIDs []string
+	expireAt time.Time // zero when the seat never expires
+}
+
+func (s *seat) expired(now time.Time) bool {
+	return !s.expireAt.IsZero() && now.After(s.expireAt)
+}
+
+func compileRouting(cfg PluginConfig) (*routingTable, error) {
 	table := &routingTable{
 		debug:   cfg.Debug,
-		byKey:   make(map[string]*UserConfig),
-		byScope: make(map[string]*UserConfig),
-		authMap: make(map[*UserConfig][]string),
+		byKey:   make(map[string]*seat),
+		byScope: make(map[string]*seat),
+	}
+	if !cfg.Enabled {
+		return table, nil
 	}
 
 	for i := range cfg.Users {
@@ -32,30 +52,54 @@ func compileRouting(cfg PluginConfig) *routingTable {
 		if user.Name == "" {
 			user.Name = fmt.Sprintf("seat-%d", i+1)
 		}
+		s := &seat{user: user}
 
+		for _, a := range user.Primary {
+			a = strings.TrimSpace(a)
+			if a != "" {
+				s.authIDs = append(s.authIDs, a)
+				s.matchIDs = append(s.matchIDs, normalizeAuthID(a))
+			}
+		}
+		if len(s.authIDs) == 0 {
+			return nil, fmt.Errorf("users[%d] (%s): primary must list at least one auth ID", i, user.Name)
+		}
+
+		if exp := strings.TrimSpace(user.ExpireAt); exp != "" {
+			t, err := time.Parse(time.RFC3339, exp)
+			if err != nil {
+				return nil, fmt.Errorf("users[%d] (%s): expire-at must be RFC3339, e.g. 2026-11-15T23:59:59+08:00: %w", i, user.Name, err)
+			}
+			s.expireAt = t
+		}
+
+		keys := 0
 		for _, k := range user.APIKeys {
 			k = strings.TrimSpace(k)
 			if k == "" {
 				continue
 			}
-			table.byKey[k] = user
-			table.byScope[callerScope(k)] = user
-		}
-
-		// Normalize primary auth IDs to lowercase
-		var normalized []string
-		for _, a := range user.Primary {
-			a = strings.TrimSpace(strings.ToLower(a))
-			if a != "" {
-				// Strip .json suffix if provided by user
-				a = strings.TrimSuffix(a, ".json")
-				normalized = append(normalized, a)
+			if prev := table.byKey[k]; prev != nil {
+				return nil, fmt.Errorf("users[%d] (%s): an api key is also assigned to %s", i, user.Name, prev.user.Name)
 			}
+			table.byKey[k] = s
+			table.byScope[callerScope(k)] = s
+			keys++
 		}
-		table.authMap[user] = normalized
+		if keys == 0 {
+			return nil, fmt.Errorf("users[%d] (%s): api-keys must list at least one key", i, user.Name)
+		}
 	}
 
-	return table
+	return table, nil
+}
+
+// normalizeAuthID canonicalizes an Auth ID for matching only. CPA uses the auth
+// file path relative to auth-dir as the ID and lowercases it on Windows.
+func normalizeAuthID(id string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	id = strings.ReplaceAll(id, `\`, "/")
+	return strings.TrimSuffix(id, ".json")
 }
 
 func callerScope(key string) string {
@@ -64,13 +108,13 @@ func callerScope(key string) string {
 }
 
 // userFor identifies the downstream caller by caller_scope metadata or Authorization header.
-func (t *routingTable) userFor(opts pluginapi.SchedulerOptions) *UserConfig {
+func (t *routingTable) userFor(opts pluginapi.SchedulerOptions) *seat {
 	if t == nil {
 		return nil
 	}
 	if scope, _ := opts.Metadata["caller_scope"].(string); scope != "" {
-		if u := t.byScope[scope]; u != nil {
-			return u
+		if s := t.byScope[scope]; s != nil {
+			return s
 		}
 	}
 
@@ -79,21 +123,21 @@ func (t *routingTable) userFor(opts pluginapi.SchedulerOptions) *UserConfig {
 			v := strings.TrimSpace(values[0])
 			if strings.HasPrefix(strings.ToLower(v), "bearer ") {
 				token := strings.TrimSpace(v[7:])
-				if u := t.byKey[token]; u != nil {
-					return u
+				if s := t.byKey[token]; s != nil {
+					return s
 				}
-				if u := t.byScope[callerScope(token)]; u != nil {
-					return u
+				if s := t.byScope[callerScope(token)]; s != nil {
+					return s
 				}
 			}
 		}
 		if strings.EqualFold(headerName, "x-api-key") && len(values) > 0 {
 			token := strings.TrimSpace(values[0])
-			if u := t.byKey[token]; u != nil {
-				return u
+			if s := t.byKey[token]; s != nil {
+				return s
 			}
-			if u := t.byScope[callerScope(token)]; u != nil {
-				return u
+			if s := t.byScope[callerScope(token)]; s != nil {
+				return s
 			}
 		}
 	}
@@ -108,39 +152,48 @@ func pickAuth(raw []byte, table *routingTable) ([]byte, error) {
 		return nil, err
 	}
 
-	if table == nil || len(table.byKey) == 0 {
+	if table == nil {
 		return unhandled()
 	}
 
-	user := table.userFor(req.Options)
-	if user == nil {
+	// 0. Fail-closed on a broken configuration, whoever the caller is
+	if table.configErr != nil {
+		return okEnvelope(pluginapi.SchedulerPickResponse{
+			Handled:      true,
+			Reject:       true,
+			RejectCode:   "carpool_config_invalid",
+			RejectReason: "carpool: plugin configuration is invalid, please contact the host",
+		})
+	}
+
+	if len(table.byKey) == 0 {
+		return unhandled()
+	}
+
+	s := table.userFor(req.Options)
+	if s == nil {
 		// Key not managed by carpool (e.g. host admin key) -> pass to CPA built-in routing
 		return unhandled()
 	}
 
 	// 1. Check auto-expiry if configured
-	if user.ExpireAt != "" {
-		if expireTime, err := time.Parse(time.RFC3339, user.ExpireAt); err == nil {
-			if time.Now().After(expireTime) {
-				return okEnvelope(pluginapi.SchedulerPickResponse{
-					Handled:      true,
-					Reject:       true,
-					RejectCode:   "seat_expired",
-					RejectReason: fmt.Sprintf("carpool: your seat (%s) expired at %s, please contact the host to renew", user.Name, user.ExpireAt),
-				})
-			}
-		}
+	if s.expired(time.Now()) {
+		return okEnvelope(pluginapi.SchedulerPickResponse{
+			Handled:      true,
+			Reject:       true,
+			RejectCode:   "seat_expired",
+			RejectReason: fmt.Sprintf("carpool: your seat (%s) expired at %s, please contact the host to renew", s.user.Name, s.user.ExpireAt),
+		})
 	}
 
 	// 2. Exact match candidate against user's primary auth IDs
-	allowedIDs := table.authMap[user]
 	var matchedCandidates []pluginapi.SchedulerAuthCandidate
 
 	for _, c := range req.Candidates {
-		candidateID := strings.TrimSuffix(strings.ToLower(c.ID), ".json")
-		for _, allowed := range allowedIDs {
-			// Exact match or token boundary match to prevent multi-seat same-email confusion
-			if candidateID == allowed || strings.HasSuffix(candidateID, allowed) {
+		candidateID := normalizeAuthID(c.ID)
+		for _, allowed := range s.matchIDs {
+			// Exact match only: a suffix match would let "alice@x.com-team" pick "malice@x.com-team"
+			if candidateID == allowed {
 				matchedCandidates = append(matchedCandidates, c)
 				break
 			}
@@ -155,6 +208,9 @@ func pickAuth(raw []byte, table *routingTable) ([]byte, error) {
 			}
 			return matchedCandidates[i].ID < matchedCandidates[j].ID
 		})
+		if table.debug {
+			logf("debug", "seat %s -> auth %s", s.user.Name, matchedCandidates[0].ID)
+		}
 		return okEnvelope(pluginapi.SchedulerPickResponse{
 			AuthID:  matchedCandidates[0].ID,
 			Handled: true,
@@ -162,10 +218,13 @@ func pickAuth(raw []byte, table *routingTable) ([]byte, error) {
 	}
 
 	// 4. Fail-closed: Never fall back to unassigned accounts (e.g. personal Pro 5x)
+	if table.debug {
+		logf("debug", "seat %s: none of its auths is among %d candidates, rejecting", s.user.Name, len(req.Candidates))
+	}
 	return okEnvelope(pluginapi.SchedulerPickResponse{
 		Handled:      true,
 		Reject:       true,
 		RejectCode:   "auth_unavailable",
-		RejectReason: fmt.Sprintf("carpool: your dedicated seat (%s) is currently in cooldown or unavailable", user.Name),
+		RejectReason: fmt.Sprintf("carpool: your dedicated seat (%s) is currently in cooldown or unavailable", s.user.Name),
 	})
 }
