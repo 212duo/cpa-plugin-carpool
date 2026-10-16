@@ -1,0 +1,22 @@
+# Binaries and shared libraries
+out/
+*.so
+*.dll
+*.dylib
+*.h
+*.exe
+
+# Logs and databases
+*.log
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.cds
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

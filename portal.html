@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CPA 席位用量查询与自助重置中心</title>
+<style>
+:root {
+  --bg: #0f172a;
+  --card: #1e293b;
+  --border: #334155;
+  --text: #f8fafc;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --accent-hover: #0ea5e9;
+  --green: #22c55e;
+  --red: #ef4444;
+  --orange: #f59e0b;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.container {
+  width: 100%;
+  max-width: 600px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+}
+h1 { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 8px; color: var(--accent); }
+.desc { font-size: 13px; color: var(--muted); text-align: center; margin-bottom: 24px; }
+.form-group { display: flex; gap: 8px; margin-bottom: 24px; }
+input[type="text"] {
+  flex: 1;
+  background: #0b1120;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  font-family: monospace;
+}
+input[type="text"]:focus { border-color: var(--accent); }
+button.btn-query {
+  background: var(--accent);
+  color: #0f172a;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  padding: 0 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+button.btn-query:hover { background: var(--accent-hover); }
+.status-card {
+  background: #0b1120;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 16px;
+}
+.stat-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.stat-row:last-child { border-bottom: none; }
+.stat-label { color: var(--muted); font-size: 14px; }
+.stat-val { font-weight: 600; font-size: 14px; font-family: monospace; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+.badge-green { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+.badge-orange { background: rgba(245, 158, 11, 0.15); color: var(--orange); }
+.badge-red { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+.reset-sec {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--border);
+}
+.reset-btn {
+  width: 100%;
+  padding: 12px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid var(--orange);
+  color: var(--orange);
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.reset-btn:hover:not(:disabled) {
+  background: var(--orange);
+  color: #0f172a;
+}
+.reset-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: var(--muted);
+  color: var(--muted);
+  background: transparent;
+}
+.credit-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.credit-item {
+  background: #070d17;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.credit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.credit-title {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 13px;
+}
+.credit-meta {
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.credit-meta div {
+  display: flex;
+  justify-content: space-between;
+}
+.credit-meta span.val {
+  color: var(--text);
+  font-family: monospace;
+}
+.footer { margin-top: 24px; text-align: center; font-size: 12px; color: var(--muted); }
+.alert { padding: 12px 16px; border-radius: 8px; margin-top: 16px; font-size: 13px; }
+.alert-ok { background: rgba(34, 197, 94, 0.15); color: var(--green); border: 1px solid var(--green); }
+.alert-err { background: rgba(239, 68, 68, 0.15); color: var(--red); border: 1px solid var(--red); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>席位用量查询与自助重置中心</h1>
+  <p class="desc">输入你的专属客户端 API Key，查询席位额度状态及核销重置卡</p>
+  
+  <div class="form-group">
+    <input type="text" id="apiKeyInput" placeholder="输入 sk-team..." value="">
+    <button class="btn-query" onclick="doQuery()">查询</button>
+  </div>
+
+  <div id="resultArea"></div>
+</div>
+
+<div class="footer">CPA Enterprise Multi-Tenant Gateway · cpa-plugin-carpool</div>
+
+<script>
+function getUrlKey() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("key") || "";
+}
+
+function formatDate(isoStr) {
+  if (!isoStr) return "--";
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const h = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    const s = String(d.getSeconds()).padStart(2, "0");
+    return `${y}-${m}-${day} ${h}:${min}:${s}`;
+  } catch(e) {
+    return isoStr;
+  }
+}
+
+function formatRemaining5h(targetUnixSec) {
+  if (!targetUnixSec) return "--";
+  const now = Math.floor(Date.now() / 1000);
+  const diff = targetUnixSec - now;
+  if (diff <= 0) return "已到达重置点";
+  const hours = Math.floor(diff / 3600);
+  const mins = Math.floor((diff % 3600) / 60);
+  if (hours > 0) {
+    return `剩余 ${hours} 小时 ${mins} 分`;
+  }
+  return `剩余 ${mins} 分`;
+}
+
+function formatScheduleWeek(targetUnixSec) {
+  if (!targetUnixSec) return "--";
+  const d = new Date(targetUnixSec * 1000);
+  const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  const w = weekdays[d.getDay()];
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const timeStr = `${w} ${hh}:${mm}`;
+
+  const now = Math.floor(Date.now() / 1000);
+  const diff = targetUnixSec - now;
+  if (diff <= 0) return `${timeStr} (已到达)`;
+
+  const days = Math.floor(diff / 86400);
+  const hours = Math.floor((diff % 86400) / 3600);
+  if (days > 0) {
+    return `${timeStr} (剩余 ${days} 天)`;
+  }
+  return `${timeStr} (剩余 ${hours} 小时)`;
+}
+
+let countdownTimer = null;
+function startCountdown(priResetAt, secResetAt) {
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdownTimer = setInterval(() => {
+    const priEl = document.getElementById("priCountdown");
+    const secEl = document.getElementById("secSchedule");
+    if (priEl && priResetAt) priEl.textContent = formatRemaining5h(priResetAt);
+    if (secEl && secResetAt) secEl.textContent = formatScheduleWeek(secResetAt);
+  }, 10000);
+}
+
+window.onload = function() {
+  const k = getUrlKey();
+  if (k) {
+    document.getElementById("apiKeyInput").value = k;
+    doQuery();
+  }
+};
+
+async function doQuery() {
+  const key = document.getElementById("apiKeyInput").value.trim();
+  const area = document.getElementById("resultArea");
+  if (!key) {
+    area.innerHTML = '<div class="alert alert-err">请输入有效的 API Key</div>';
+    return;
+  }
+  area.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--muted);">正在连接网关查询真实状态...</div>';
+
+  try {
+    const res = await fetch("api/status?key=" + encodeURIComponent(key));
+    const d = await res.json();
+    if (!res.ok || d.error) {
+      area.innerHTML = '<div class="alert alert-err">查询失败：' + (d.error || "未找到此 Key") + '</div>';
+      return;
+    }
+
+    const pri = d.upstream_usage?.rate_limit?.primary_window || {};
+    const sec = d.upstream_usage?.rate_limit?.secondary_window || {};
+    const credCount = d.credits_available ?? 0;
+    const isCooling = d.is_cooling;
+
+    let statusBadge = '<span class="badge badge-green">正常运行</span>';
+    if (isCooling || pri.used_percent >= 100 || sec.used_percent >= 100) {
+      statusBadge = '<span class="badge badge-red">额度触顶 (冷却中)</span>';
+    }
+
+    let html = '<div class="status-card">';
+    html += '<div class="stat-row"><span class="stat-label">绑定席位</span><span class="stat-val">' + d.seat_name + '</span></div>';
+    html += '<div class="stat-row"><span class="stat-label">网关状态</span><span class="stat-val">' + statusBadge + '</span></div>';
+    html += '<div class="stat-row"><span class="stat-label">5小时滚动已用</span><span class="stat-val">' + (pri.used_percent !== undefined ? pri.used_percent + "%" : "0%") + '</span></div>';
+    if (pri.reset_at) {
+      html += '<div class="stat-row"><span class="stat-label">⏱️ 5小时额度刷新倒计时</span><span class="stat-val" id="priCountdown" style="color: var(--accent);">' + formatRemaining5h(pri.reset_at) + '</span></div>';
+    }
+    html += '<div class="stat-row"><span class="stat-label">周限额已用</span><span class="stat-val">' + (sec.used_percent !== undefined ? sec.used_percent + "%" : "0%") + '</span></div>';
+    if (sec.reset_at) {
+      html += '<div class="stat-row"><span class="stat-label">📅 周限额度刷新时间</span><span class="stat-val" id="secSchedule" style="color: var(--accent);">' + formatScheduleWeek(sec.reset_at) + '</span></div>';
+    }
+    html += '<div class="stat-row"><span class="stat-label">历史总调用</span><span class="stat-val">' + d.local_calls + ' 次 (约 ' + Math.round(d.local_tokens / 1000) + 'k Tokens)</span></div>';
+    html += '<div class="stat-row"><span class="stat-label">可用撞墙重置卡</span><span class="stat-val" style="color: var(--orange);">' + credCount + ' 张</span></div>';
+    html += '</div>';
+
+    html += '<div class="reset-sec">';
+    html += '<button class="reset-btn" ' + (credCount <= 0 ? "disabled" : "") + ' onclick="doReset(\'' + key + '\')">';
+    html += (credCount > 0 ? "⚡ 一键核销重置卡并解除冷却 (剩余 " + credCount + " 次)" : "暂无可用重置卡");
+    html += '</button>';
+    html += '<div style="font-size:12px; color:var(--muted); margin-top:8px; line-height:1.4;">* 说明：当写代码撞限（429 Too Many Requests）时，点击此按钮可立即消耗一张官方重置卡瞬间满血复活。请按需合理使用。</div>';
+
+    const creditsList = d.credits_list || [];
+    if (creditsList.length > 0) {
+      html += '<div style="margin-top: 18px;">';
+      html += '<div style="font-size: 13px; font-weight: 600; color: var(--accent); margin-bottom: 8px;">重置卡使用时间与明细</div>';
+      html += '<div class="credit-list">';
+      creditsList.forEach((c) => {
+        const isRedeemed = c.status === "redeemed" || (c.redeemed_at && c.redeemed_at !== "");
+        const badge = isRedeemed
+          ? '<span class="badge badge-orange">已使用</span>'
+          : '<span class="badge badge-green">可使用</span>';
+
+        html += '<div class="credit-item">';
+        html += '<div class="credit-header">';
+        html += '<span class="credit-title">' + (c.title || "额度重置卡") + '</span>';
+        html += badge;
+        html += '</div>';
+        html += '<div class="credit-meta">';
+        html += '<div><span>发放时间</span><span class="val">' + formatDate(c.granted_at) + '</span></div>';
+        if (isRedeemed) {
+          html += '<div><span style="color:var(--orange);">使用时间</span><span class="val" style="color:var(--orange); font-weight:600;">' + formatDate(c.redeemed_at) + '</span></div>';
+        } else {
+          html += '<div><span>有效期至</span><span class="val" style="color:var(--accent);">' + formatDate(c.expires_at) + '</span></div>';
+        }
+        html += '</div>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    } else {
+      html += '<div style="font-size: 12px; color: var(--muted); margin-top: 14px; text-align: center;">暂无已发放的重置卡记录</div>';
+    }
+
+    html += '</div>';
+
+    area.innerHTML = html;
+    if (pri.reset_at || sec.reset_at) {
+      startCountdown(pri.reset_at, sec.reset_at);
+    }
+  } catch(e) {
+    area.innerHTML = '<div class="alert alert-err">网络错误：' + e.message + '</div>';
+  }
+}
+
+async function doReset(key) {
+  if (!confirm("确定要消耗 1 张重置卡立即回满额度吗？")) return;
+  const area = document.getElementById("resultArea");
+  area.innerHTML = '<div style="text-align:center; padding: 20px; color: var(--orange);">正在调用 OpenAI 上游核销重置卡并同步解除网关冷却...</div>';
+
+  try {
+    const res = await fetch("api/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: key })
+    });
+    const d = await res.json();
+    if (d.success) {
+      alert("🎉 重置成功！额度已恢复满血，网关冷却已解除。");
+      doQuery();
+    } else {
+      alert("重置失败：" + (d.error || "未知原因"));
+      doQuery();
+    }
+  } catch(e) {
+    alert("请求失败：" + e.message);
+    doQuery();
+  }
+}
+</script>
+</body>
+</html>
