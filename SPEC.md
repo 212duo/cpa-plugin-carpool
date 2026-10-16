@@ -1,111 +1,160 @@
-# cpa-plugin-carpool 技术方案与需求规格说明书 (SPEC)
+# cpa-plugin-carpool 技术规格说明（SPEC）
 
-> 项目名称：**cpa-plugin-carpool (CPA 拼车管家)**  
-> 目标宿主：[router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA v8+ ABI)  
-> 适用场景：个人车主、小团队、闲置席位合租转售、轻量级多租户管理
+> 项目名称：**cpa-plugin-carpool（CPA 拼车管家）**
+> 目标宿主：[router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) v8.0.30+（原生插件 ABI v1）
+> 适用场景：个人与小团队的多租户账号分配、席位共享
+> 当前版本：v0.2.0
 
 ---
 
 ## 1. 背景与产品定位
 
-### 1.1 痛点诊断
-1. **重型方案（Sub2API / NewAPI / OneAPI）过重**：
-   - 依赖 MySQL、Redis、独立容器集群，常驻内存 500MB~1GB+；
-   - 运维和配置极其繁琐，对于只有 2~10 个账号想做轻量拼车分摊成本的小车主而言属于“杀鸡用牛刀”。
-2. **纯 CPA / 现有插件过于简陋**：
-   - CPA 本身为反代网关内核，完全没有面向买家/租户的自助服务前端；
-   - 现有 `key-router` 插件仅做简陋路由，无用量透视与额度感知，且在“同一邮箱下存在多个不同类型账号（如 Team 席位 + 个人 Pro 5x）”时存在严重的前端模糊匹配与覆盖 Bug；
-   - 现有 `codex-auto-reset` 仅支持后台全自动盲目核销，买家无法主观决定何时使用稀缺的重置卡；
-   - **车主沦为 24 小时人工客服**：买家一旦撞限（429 Too Many Requests），只能找车主看后台、人工查询额度并手动重置，沟通成本极高。
+### 1.1 痛点
 
-### 1.2 产品定位
-**CPA 拼车管家 (cpa-plugin-carpool)** 是一款嵌入在 CLIProxyAPI 内部的高性能轻量级微服务插件。  
-- **对车主**：零数据库、零外部中间件，配置文件或 Web 控制台一键生成买家独占 Key，支持到期自动熔断与防刷频控，实现“收钱后甩手”；
-- **对买家**：凭专属 API Key 进入极简自助 Portal，实时查看 5 小时短窗与周额度刷新倒计时、历史 Token 消耗，并在撞限时 2 秒内自助核销重置卡瞬间满血复活；
-- **对安全**：坚持零信任原则，彻底剥离上游账号的真实邮箱、UUID、Token，物理阻断跨租户越权。
+1. **重型方案（Sub2API / NewAPI / OneAPI）过重**：依赖数据库、Redis 和独立服务，对只有 2~10 个账号的场景来说运维成本过高。
+2. **纯 CPA 缺少多租户能力**：
+   - CPA 是反代网关内核，没有面向使用者的自助页面；
+   - 按 `provider:email` 匹配的路由插件（如 `key-router`）在同一邮箱下有多个账号（如 Team 席位 + 个人 Pro）时会串号；
+   - 全自动重置类插件由后台决定何时核销，使用者无法自己决定何时使用稀缺的重置卡；
+   - 使用者撞限（429）后只能找管理员查额度、手动重置。
 
----
+### 1.2 定位
 
-## 2. 核心需求功能矩阵
+**cpa-plugin-carpool** 以原生动态库形式运行在 CLIProxyAPI 内部：
 
-### 2.1 买家自助端 (Buyer Portal)
-- [x] **API Key 快速鉴权**：通过 URL 参数 `?key=sk-...` 或输入框快速鉴权，支持免密码直接访问自身席位。
-- [x] **上游双窗口额度透视**：
-  - 实时采集上游 5 小时短窗（18000s）已用百分比；
-  - 实时采集上游 7 天周限额度（604800s）已用百分比。
-- [x] **刷新时间与倒计时（核心创新点）**：
-  - `⏱️ 5小时额度刷新倒计时`：实时动态递减展示（如 `剩余 1 小时 23 分`）；
-  - `📅 周限额度刷新时间`：格式化本地时间与星期展示（如 `周日 18:00 (剩余 3 天)`）。
-- [x] **历史用量统计 (M 级精度透视)**：
-  - 读取网关本地 SQLite 统计数据，以 M (Million Tokens) 为单位展示该 Key 的历史总请求次数与 Token 吞吐；
-  - 具备清晰的输入 (Input)、输出 (Output) 与缓存读取命中 (Cached) 三列数据看板。
-- [x] **重置卡时间线明细与自主核销**：
-  - 列表展示当前账号拥有的全部重置卡（Title、状态、发放时间、到期失效时间）；
-  - 若已使用，展示具体的**使用/核销时间**；
-  - 撞限时提供防误触的【⚡ 一键核销重置卡】按钮，2 秒内调用 OpenAI 上游并同步解除 CPA 本地冷却，立刻满血。
-- [ ] **客户端极速接入卡片 (接入引导)**：
-  - 提供 Cursor、Claude Code、Windsurf、Cline 的 1 键复制配置模板。
-
-### 2.2 车主管理端 (Operator Controls)
-- [ ] **真·物理凭据精确绑定 (修复 key-router Bug)**：
-  - 放弃脆弱的 `provider:email` 模糊匹配，采用 `provider:auth_id` / 文件名精确绑定，支持同一邮箱下 Team 席位与个人 Pro 5x 彻底隔离。
-- [ ] **租期到期自动熔断 (Auto-Expiry)**：
-  - 支持给每个 Key 设置 `expire_at`（如周租第 7 天 23:59:59），到期自动失效，无须人工下线。
-- [ ] **单 Key 限频与防刷保护 (Rate Limiting)**：
-  - 限制单 Key 最大并发（如并发 1~2）与 RPM（每分钟请求数），防止自动化脚本死循环把账号打崩。
+- **对管理员**：零数据库、零额外进程；在 `config.yaml` 里把 key 绑到账号，支持到期自动失效；
+- **对使用者**：凭自己的 key 打开 Portal，查看 5 小时窗口与周窗口的额度和刷新倒计时、历史 Token 用量，撞限时自助核销重置卡；
+- **对安全**：出错即拒绝；对外只输出白名单字段，不暴露上游账号的邮箱、account_id、token。
 
 ---
 
-## 3. 架构设计与技术规范
+## 2. 功能需求
 
-### 3.1 CPA 插件 ABI 契约
-插件采用 Go 语言开发，编译为 C-shared 动态库（`.so` / `.dll` / `.dylib`）：
+### 2.1 买家自助端（Portal）
+
+- [x] **Key 鉴权**：通过 `X-Carpool-Key` 请求头（或 `key` 查询参数）识别席位；分享链接使用 `#key=`。
+- [x] **额度窗口**：展示上游 5 小时窗口与周窗口的已用比例（仅 Codex 账号）。
+- [x] **刷新倒计时**：5 小时窗口动态倒计时（如 `剩余 1 小时 23 分`），周窗口按本地时间展示（如 `周日 18:00 (剩余 3 天)`）。
+- [x] **历史用量**：读取 CPA Manager Plus 的 `usage.sqlite`，以 M（百万 Token）为单位展示调用次数与输入 / 输出 / 缓存命中。
+- [x] **重置卡明细与自助核销**：列出重置卡（标题、状态、发放时间、到期时间、使用时间）；核销后通过宿主回调解除 CPA 冷却。
+- [x] **冷却状态与租期**：展示 CPA 运行时冷却状态与席位到期时间。
+- [ ] **客户端接入引导**：Codex CLI、Cursor、Claude Code 等客户端的一键复制配置模板。
+
+### 2.2 管理端
+
+- [x] **精确绑定**：按 CPA 账号 ID（auth 文件相对路径）精确匹配，同邮箱的多个账号互不干扰。
+- [x] **租期到期**：每个席位可配置 `expire-at`，到期后调度与 Portal 一律拒绝。
+- [x] **配置校验**：严格解析，配置错误时拒绝全部请求并写日志。
+- [ ] **单 key 限频**：限制单 key 并发与 RPM。
+- [ ] **管理界面**：席位增删改、key 生成、用量审计。
+
+---
+
+## 3. 架构
+
+### 3.1 插件 ABI
+
+插件用 Go 编写，以 `-buildmode=c-shared` 编译为 `cpa-carpool.so`：
+
+- 入口 `cliproxy_plugin_init(const cliproxy_host_api*, cliproxy_plugin_api*)`：保存宿主回调表，填写插件函数表（ABI 版本 1）。
+- 插件 ID 取自文件名（去掉扩展名与 `-v版本号` 后缀），配置位于 `plugins.configs.<插件ID>`。
+- 注册时声明能力：`scheduler`、`scheduler_across_priorities`、`management_api`；schema 版本 1。
 
 ```text
-               客户端 (Cursor / Claude Code)
-                            │
-               ┌────────────▼────────────┐
-               │    CLIProxyAPI (CPA)    │
-               │  ┌───────────────────┐  │
-               │  │  Plugin ABI Host  │  │
-               │  └─────────┬─────────┘  │
-               └────────────┼────────────┘
-                            │
-              ┌─────────────▼─────────────┐
-              │    cpa-plugin-carpool     │
-              ├───────────────────────────┤
-              │ 1. Scheduler (独占调度)    │
-              │ 2. Resource (买家 Portal) │
-              │ 3. Reset Engine (一键重置) │
-              │ 4. Rate Limiter (防刷频控) │
-              └───────────────────────────┘
+               客户端 (Codex CLI / Cursor / Claude Code)            买家浏览器
+                            │                                          │
+               ┌────────────▼──────────────────────────────────────────▼──────┐
+               │                    CLIProxyAPI v8                            │
+               │  access.api-keys ──► scheduler.pick ──┐   resource (GET) ──┐  │
+               │                                       ▼                    ▼  │
+               │                 ┌──────────── cpa-carpool.so ─────────────┐   │
+               │                 │ plugin.go     配置加载 / 方法分发         │   │
+               │                 │ scheduler.go  key → 席位 → 账号 ID        │   │
+               │                 │ portal.go     /portal /api/status /reset │   │
+               │                 │ host.go       宿主回调                    │   │
+               │                 │ upstream.go   ChatGPT 额度接口 + 缓存     │   │
+               │                 └──────────────────┬──────────────────────┘   │
+               │   host.auth.list / get / get_runtime, host.routing.reset_cooldown, host.log
+               └─────────────────────────────────────┼────────────────────────┘
+                                                     ▼
+                                   chatgpt.com/backend-api/wham/*
 ```
 
-1. **Resource API (静态 Portal 与买家接口)**：
-   - `GET /v0/resource/plugins/carpool/portal`：提供嵌入式的自适应响应式 Portal 页面；
-   - `GET /v0/resource/plugins/carpool/api/status?key=...`：脱敏后的实时配额与倒计时接口；
-   - `POST /v0/resource/plugins/carpool/api/reset`：买家自主核销重置卡并同步清除网关冷却。
-2. **Scheduler (调度核心)**：
-   - 实现 `pluginapi.Scheduler` 接口；
-   - 在 `Pick(ctx, req)` 中提取客户端 `caller_scope` 或 Header 中的 API Key；
-   - 命中买家规则直接指定唯一的 `AuthID`，未授权账号对该买家完全不可见；
-   - 买家账号冷却或故障时直接返回 typed reject，严禁流量溢出回退。
-3. **Management API (车主管理)**：
-   - 挂载在 `/v0/management/plugins/carpool/` 下，受 CPA 管理秘钥保护；
-   - 提供可视化配置、买家 CRUD、Key 生成与用量审计。
+### 3.2 调度（`scheduler.pick`）
 
-### 3.2 零信任脱敏原则 (Zero-Trust PII Masking)
-在向买家前端吐出数据时，执行严格的**最小字段白名单过滤**：
-- 严格屏蔽：`account_id`、`user_id`、`email`、`access_token`、`refresh_token`、`organization_id`；
-- 仅保留：`seat_name`、`primary_window` (used/reset_at)、`secondary_window` (used/reset_at)、`credits` (title/status/granted_at/expires_at/redeemed_at)、`local_stats`。
+1. 配置无效：返回 `Reject`（`carpool_config_invalid`），**不区分调用方**。
+2. 插件未启用或没有席位：返回 `Handled=false`，交给 CPA 默认调度。
+3. 识别调用方：优先使用 CPA 提供的 `caller_scope`（`sha256("cli-proxy-api:caller-scope:v1\0" + key)`），其次是 `Authorization: Bearer` 与 `x-api-key` 请求头。未命中任何席位的 key 交给 CPA 默认调度。
+4. 席位已到期：返回 `Reject`（`seat_expired`）。
+5. 在候选账号中精确匹配席位的账号 ID（忽略大小写、路径分隔符风格和 `.json` 后缀），按 CPA 优先级、再按 ID 排序选第一个。
+6. 没有匹配的候选：返回 `Reject`（`auth_unavailable`），**绝不回落到其他账号**。
+
+> CPA 同一时间只调用一个调度插件（优先级最高的那个），返回 `Handled=false` 时直接使用内置调度。因此本插件不能与 key-router 等其他调度插件同时使用。
+
+### 3.3 资源路由（Portal）
+
+CPA 的插件资源路由不需要管理密钥、只接受 GET、按精确路径匹配，因此插件注册三个路由，均位于 `/v0/resource/plugins/<插件ID>/` 下：
+
+| 路由 | 说明 |
+| :--- | :--- |
+| `GET /portal` | 嵌入式单页（`portal.html`），带 CSP、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff` |
+| `GET /api/status` | 席位状态（见 3.5） |
+| `GET /api/reset?confirm=1` | 核销一张重置卡并解除冷却；不带 `confirm=1` 返回 400 |
+
+`/api/status` 与 `/api/reset` 共同的前置检查：key 为空 → 400；配置无效 → 503；key 未配置 → 404；席位到期 → 403。
+
+**核销流程**：全局互斥（已有核销在进行时返回 409）→ `host.auth.list` 找到席位账号 → `host.auth.get` 取凭据 → 实时查询可用重置卡 → 调用上游核销（失败时原始错误只写日志，返回 502 与通用提示）→ 清除额度缓存 → `host.routing.reset_cooldown` 解除 CPA 冷却（失败时返回成功但提示冷却未解除）。
+
+### 3.4 宿主回调
+
+| 回调 | 用途 |
+| :--- | :--- |
+| `host.auth.list` | 把席位的账号 ID 解析为 CPA 运行时的 `auth_index`（只包含基于认证文件的账号和纯运行时账号，不含 `config.yaml` 中的 API Key 账号） |
+| `host.auth.get` | 读取账号凭据 JSON（`access_token`、`account_id`） |
+| `host.auth.get_runtime` | 读取运行时状态（`unavailable`、`next_retry_after`）判断是否冷却中 |
+| `host.routing.reset_cooldown` | 解除账号的额度与冷却状态，等同于管理接口 `POST /v8/management/routing/cooldown/reset` |
+| `host.log` | 写入 CPA 日志，失败时回退到 stderr |
+
+### 3.5 字段白名单
+
+`/api/status` 只返回：`seat_name`、`quota_supported`、`upstream_usage.rate_limit`（primary / secondary 窗口的 `used_percent`、`reset_at`）、`credits_available`、`credits_list`（`title`、`status`、`granted_at`、`expires_at`、`redeemed_at`）、`is_cooling`、`expires_at`、`local_calls`、`input_tokens`、`output_tokens`、`cached_tokens`、`total_tokens`。
+
+明确不返回：`email`、`account_id`、`user_id`、`organization_id`、`access_token`、`refresh_token`，以及上游的原始错误信息。
+
+### 3.6 上游请求控制
+
+- 每个账号的额度与重置卡查询结果缓存 30 秒（按 `auth_index`），核销成功后清除。
+- 上游响应体读取上限：查询 1 MiB，核销错误 4 KiB。
+- 请求头 `User-Agent` 默认模拟 Codex CLI，可通过 `upstream-user-agent` 覆盖。
+
+### 3.7 配置
+
+```yaml
+plugins:
+  configs:
+    cpa-carpool:
+      enabled: true
+      priority: 100
+      debug: false
+      db-path: ""
+      upstream-user-agent: ""
+      users:
+        - name: "TeamA-席位1"
+          api-keys: ["sk-..."]
+          primary: ["codex-....json"]
+          expire-at: "2026-11-15T23:59:59+08:00"
+```
+
+校验规则：未知字段报错；每个席位至少一个 `api-keys` 与一个 `primary`；同一 key 不得出现在两个席位；`expire-at` 必须为 RFC3339。`priority` 与 `store` 由 CPA 读取，插件只做声明以通过严格解析。
 
 ---
 
-## 4. 实施阶段演进路线
+## 4. 实施阶段
 
 | 阶段 | 交付目标 | 核心工作项 | 状态 |
 | :--- | :--- | :--- | :--- |
-| **Phase 1** | 原型验证与独立 Portal | Python 微服务 + Caddy 反代 + 倒计时 + 一键核销 | **已完成** ✅ |
-| **Phase 2** | 项目开源基础搭建 | GitHub 仓库初始化、SPEC 规格书、编译流与协议 | **进行中** 🚀 |
-| **Phase 3** | Go 原生动态库插件化 | 接入 CPA Plugin ABI，移除 Python 依赖与 Caddy 反代 | 待启动 |
-| **Phase 4** | 官方插件商店发布 | 编写 `registry.json`，投放到 NodeSeek / LINUX DO 社区 | 待启动 |
+| **Phase 1** | 原型验证 | Python 微服务 + Caddy 反代 + 倒计时 + 一键核销 | 已完成 ✅ |
+| **Phase 2** | 开源基础 | 仓库、SPEC、构建流程、协议 | 已完成 ✅ |
+| **Phase 3** | Go 原生插件 | CPA v8 插件 ABI、宿主回调、测试与 CI | 已完成 ✅（v0.2.0） |
+| **Phase 4** | 限频与接入引导 | 单 key 并发 / RPM 限制、客户端配置模板 | 计划中 |
+| **Phase 5** | 管理界面与插件商店 | 席位管理 UI、`registry.json`、提交 CLIProxyAPI 插件商店 | 计划中 |
