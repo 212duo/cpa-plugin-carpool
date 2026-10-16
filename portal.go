@@ -223,9 +223,13 @@ func handleAPIReset(req pluginapi.ManagementRequest, table *routingTable, cfg Pl
 	// 2. Consume credit upstream
 	errConsume := consumeCreditUpstream(authData, targetCreditID)
 	if errConsume != nil {
+		errStr := errConsume.Error()
+		if strings.Contains(strings.ToLower(errStr), "token") || strings.Contains(strings.ToLower(errStr), "auth") {
+			errStr = "核销请求异常，请稍后重试"
+		}
 		return jsonResponse(http.StatusInternalServerError, map[string]any{
 			"success": false,
-			"error":   errConsume.Error(),
+			"error":   errStr,
 		})
 	}
 
@@ -234,7 +238,7 @@ func handleAPIReset(req pluginapi.ManagementRequest, table *routingTable, cfg Pl
 
 	return jsonResponse(http.StatusOK, map[string]any{
 		"success": true,
-		"message": "Reset card consumed and cooling lock cleared successfully",
+		"message": "重置成功，额度已恢复满血",
 	})
 }
 
