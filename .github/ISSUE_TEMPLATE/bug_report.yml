@@ -1,0 +1,54 @@
+name: Bug 反馈
+description: 插件行为异常、加载失败或 Portal 报错
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请确认：已阅读 README 的「已知限制」，并且**已从日志和配置里删除所有 API Key、token、邮箱和 account_id**。
+        安全漏洞请不要在这里公开提交，见 [SECURITY.md](https://github.com/212duo/cpa-plugin-carpool/blob/main/SECURITY.md)。
+  - type: input
+    id: plugin-version
+    attributes:
+      label: 插件版本
+      placeholder: v0.2.0
+    validations:
+      required: true
+  - type: input
+    id: cpa-version
+    attributes:
+      label: CLIProxyAPI 版本
+      placeholder: v8.0.30
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 运行平台
+      options:
+        - 官方 Docker 镜像 (linux/amd64)
+        - 官方 Docker 镜像 (linux/arm64)
+        - Linux 二进制 (amd64)
+        - Linux 二进制 (arm64)
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述与复现步骤
+      description: 期望的行为、实际的行为、如何复现
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: 插件配置（脱敏后）
+      description: plugins.configs.cpa-carpool 这一段，把 key 换成 sk-xxx
+      render: yaml
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志（脱敏后）
+      description: CPA 日志中带 [carpool] 或 pluginhost 的行
+      render: text

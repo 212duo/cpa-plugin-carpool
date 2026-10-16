@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Check the tag matches PluginVersion
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -q "PluginVersion = \"$version\"" types.go; then
+            echo "types.go PluginVersion does not match tag $GITHUB_REF_NAME"
+            exit 1
+          fi
+
+      - name: Test and build in golang:1.26-bookworm
+        run: sh ./build.sh test
+
+      - name: Package
+        run: |
+          name="cpa-carpool_${GITHUB_REF_NAME#v}_linux_${{ matrix.arch }}"
+          mkdir -p "dist/$name"
+          cp out/cpa-carpool.so LICENSE README.md CHANGELOG.md config.example.yaml "dist/$name/"
+          sh scripts/third_party_licenses.sh "dist/$name/third_party_licenses"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum *.tar.gz > SHA256SUMS
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            /^## \[/ { if (found) exit; if (index($0, "## [" ver "]") == 1) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag

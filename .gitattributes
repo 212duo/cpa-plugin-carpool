@@ -1,0 +1,7 @@
+# Keep LF everywhere so shell scripts still run after a checkout on Windows
+# (core.autocrlf=true would otherwise turn them into CRLF).
+* text=auto eol=lf
+
+*.so binary
+*.png binary
+*.jpg binary

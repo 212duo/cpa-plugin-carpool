@@ -1,5 +1,7 @@
-# Binaries and shared libraries
+# Binaries, shared libraries and release staging
 out/
+dist/
+third_party_licenses/
 *.so
 *.dll
 *.dylib

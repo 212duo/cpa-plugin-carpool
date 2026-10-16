@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 报告安全漏洞
+    url: https://github.com/212duo/cpa-plugin-carpool/security/advisories/new
+    about: 请通过 GitHub 私密漏洞报告提交，不要公开发 Issue
+  - name: CLIProxyAPI 本身的问题
+    url: https://github.com/router-for-me/CLIProxyAPI/issues
+    about: 与本插件无关的网关问题请到 CLIProxyAPI 仓库反馈

@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Test (cgo, race detector)
+        run: go test -race -count=1 ./...
+
+      - name: Test (without cgo)
+        run: CGO_ENABLED=0 go test -count=1 ./...
+
+  build:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build in golang:1.26-bookworm
+        run: sh ./build.sh
+
+      - name: Check the C ABI entry point is exported
+        run: nm -D --defined-only out/cpa-carpool.so | grep -w cliproxy_plugin_init
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cpa-carpool-linux-${{ matrix.arch }}
+          path: out/cpa-carpool.so
+          if-no-files-found: error
