@@ -20,6 +20,7 @@
 - `upstream-user-agent` 配置项。
 - 非 Codex 账号的席位也能使用调度绑定，Portal 会提示该类型不支持额度查询。
 - 单元测试（模拟 CPA 宿主与 ChatGPT 上游）、GitHub Actions CI 与 Release 流程、linux/amd64 与 linux/arm64 预编译包。
+- 英文版 README（`README.en.md`），README 中加入 Portal 截图与架构图。
 
 ### 安全
 

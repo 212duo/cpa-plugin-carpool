@@ -40,6 +40,8 @@ sh build.sh test    # 在 Docker 里测试并编译 out/cpa-carpool.so
 
 - 新功能和 bug 修复都需要配套测试。测试里用 `installFakeHost` 模拟 CPA 宿主回调，用 `installFakeUpstream` 模拟 ChatGPT 接口，不要访问真实服务。
 - 修改配置项时同步更新 `config.example.yaml`，`TestConfigExampleIsValid` 会校验它。
+- 中英文 README（`README.md`、`README.en.md`）内容要保持一致，改了一份请同步另一份。
+- `docs/images/portal.png` 是用演示数据渲染的 Portal 截图，Portal 界面有明显变化时请重新截图；截图里不能出现真实的 key、邮箱或账号信息。
 
 ## 提交 PR
 

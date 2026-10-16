@@ -10,14 +10,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 ![CPA](https://img.shields.io/badge/CLIProxyAPI-v8.0.30%2B-informational)
 
+**简体中文** · [English](./README.en.md)
+
 [快速开始](#-快速开始) · [配置参考](#-配置参考) · [安全设计](#-安全设计) · [已知限制](#-已知限制) · [技术规格 (SPEC.md)](./SPEC.md) · [更新日志](./CHANGELOG.md)
 
 </div>
 
 > [!WARNING]
 > **社区项目，与 CLIProxyAPI 官方、OpenAI、Anthropic 均无关联。** 多数 AI 服务的使用条款禁止共享或转让账号，使用本插件可能导致你的账号被限制或封禁；查询额度和核销重置卡依赖 ChatGPT 未公开的接口，随时可能失效。请先阅读文末的[免责声明](#-免责声明)，风险由使用者自行承担。
-
-*English summary: a CLIProxyAPI v8 native plugin that pins each client API key to dedicated upstream credentials (fail-closed), and serves a self-service portal where key holders can check Codex quota windows, see reset countdowns and redeem rate-limit reset credits. Chinese documentation below.*
 
 ---
 
@@ -43,52 +43,17 @@
 | **自助核销重置卡** | 核销一张官方重置卡，并通过 CPA 宿主接口立即解除该账号的冷却 |
 | **最小化暴露** | 返回给买家的数据只保留白名单字段，不包含邮箱、account_id、token |
 
-<details>
-<summary>Portal 界面示意</summary>
-
-```text
-┌─────────────────────────────────────────────────────────┐
-│              席位用量查询与自助重置中心                 │
-├─────────────────────────────────────────────────────────┤
-│ 绑定席位：            TeamA-席位1                       │
-│ 网关状态：            🟢 正常运行                       │
-│ 租期到期：            2026-11-15 23:59:59               │
-│ 5小时滚动已用：       37%                               │
-│ ⏱️ 5小时刷新倒计时： 剩余 3 小时 45 分                 │
-│ 周限额已用：          12%                               │
-│ 📅 周限刷新时间：     周五 18:04 (剩余 6 天)            │
-│ 历史总调用：          158 次 · 总计 2.45M               │
-│  ┌──────────────┬──────────────┬──────────────┐         │
-│  │ 输入: 0.85M  │ 输出: 0.12M  │ 缓存: 1.48M  │         │
-│  └──────────────┴──────────────┴──────────────┘         │
-│ 可用撞墙重置卡：      2 张                              │
-├─────────────────────────────────────────────────────────┤
-│ [⚡ 一键核销重置卡并解除冷却 (剩余 2 次)]               │
-└─────────────────────────────────────────────────────────┘
-```
-
-</details>
+<p align="center">
+  <img src="docs/images/portal.png" alt="买家 Portal：席位状态、额度窗口与刷新倒计时、Token 用量、重置卡列表" width="460">
+  <br>
+  <sub>买家 Portal（演示数据）</sub>
+</p>
 
 ## 🔧 工作原理
 
-```text
- 客户端 (Codex CLI / Cursor / Claude Code …)          买家浏览器
-          │  Authorization: Bearer sk-buyer…              │  /v0/resource/plugins/cpa-carpool/portal
-          ▼                                               ▼
- ┌──────────────────── CLIProxyAPI v8 ─────────────────────────────┐
- │  access.api-keys 认证                                           │
- │        │                                                        │
- │        ▼                       ┌──── cpa-carpool.so ─────────┐  │
- │  调度 (scheduler.pick) ───────►│ key → 席位 → 账号 ID         │  │
- │                                │ 命中：只选绑定账号，否则拒绝 │  │
- │                                │ 未命中：交回 CPA 默认调度    │  │
- │  资源路由 (GET only) ─────────►│ Portal / api/status / reset  │  │
- │                                └──────┬───────────────────────┘  │
- │  宿主回调 ◄── host.auth.* / host.routing.reset_cooldown / host.log │
- └─────────────────────────────────────────┬────────────────────────┘
-                                           ▼
-                         chatgpt.com 额度与重置卡接口（仅 Codex 账号）
-```
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="架构图：客户端请求经 CPA 认证后进入调度，cpa-carpool 按 key 只选绑定账号，否则拒绝；未托管的 key 交回 CPA 内置调度。Portal 通过资源路由提供，经宿主回调读取凭据与冷却状态，并查询 chatgpt.com 额度" width="100%">
+</p>
 
 * **调度**：插件注册为 CPA 的调度插件。请求到达时，插件根据调用方的 key（CPA 提供的 `caller_scope`，或 `Authorization` / `x-api-key` 头）找到对应席位，只在该席位绑定的账号里选择。不在配置里的 key（比如你自己的）交回 CPA 默认调度。
 * **Portal**：通过 CPA 的插件资源路由提供页面和两个接口。账号凭据、运行时冷却状态都通过 CPA 宿主回调读取，插件不直接读写 auth 目录。
@@ -258,6 +223,8 @@ PLATFORM=linux/arm64 sh build.sh   # 交叉编译 arm64（需要 Docker 的 QEMU
 ├── portal.html        # 买家 Portal 单页（编译时嵌入）
 ├── carpool_test.go    # 单元测试（模拟 CPA 宿主与 ChatGPT 上游）
 ├── config.example.yaml
+├── docs/images/       # README 用到的截图与架构图
+├── README.en.md       # 英文版 README
 └── build.sh           # Docker 编译脚本（golang:1.26-bookworm）
 ```
 
