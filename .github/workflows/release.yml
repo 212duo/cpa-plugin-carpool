@@ -39,7 +39,8 @@ jobs:
         run: |
           name="cpa-carpool_${GITHUB_REF_NAME#v}_linux_${{ matrix.arch }}"
           mkdir -p "dist/$name"
-          cp out/cpa-carpool.so LICENSE README.md CHANGELOG.md config.example.yaml "dist/$name/"
+          cp out/cpa-carpool.so LICENSE README.md README.en.md CHANGELOG.md config.example.yaml "dist/$name/"
+          mkdir -p "dist/$name/docs" && cp -r docs/images "dist/$name/docs/"
           sh scripts/third_party_licenses.sh "dist/$name/third_party_licenses"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
 
