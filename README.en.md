@@ -12,7 +12,7 @@
 
 [简体中文](./README.md) · **English**
 
-This README covers unreleased 0.4.0 (owner administration and store assets) and 0.5.0 (request monitoring and wider layouts). For older downloads, follow the notes for that Release.
+The current release is [v0.5.0](https://github.com/212duo/cpa-plugin-carpool/releases/tag/v0.5.0), including owner administration, request monitoring and wider layouts.
 
 [Quick start](#-quick-start) · [Configuration](#-configuration-reference) · [Security](#-security-design) · [Known limitations](#-known-limitations) · [Spec (SPEC.md, Chinese)](./SPEC.md) · [Changelog](./CHANGELOG.md)
 
@@ -359,8 +359,8 @@ Please read [CONTRIBUTING.md](./CONTRIBUTING.md) (Chinese) before contributing. 
 - [x] **v0.1.0**: standalone prototype (Python + Caddy) validating the countdowns, one-click reset and field masking
 - [x] **v0.2.0**: native CPA v8 plugin; exact binding, lease expiry, fail-closed config; cooldown cleared through host callbacks
 - [x] **v0.3.0**: per-seat concurrency / RPM limits (shared by the seat's keys); client setup guides in the portal (Codex CLI, Claude Code, Cursor, OpenAI-compatible)
-- [x] **v0.5.0 (unreleased)**: private per-key request monitoring and wider Portal / admin layouts
-- [x] **v0.4.0**: owner admin page (seat management, key generation, account binding, limits and usage); plugin store release assets and registry entry
+- [x] **v0.5.0**: private per-key request monitoring and wider Portal / admin layouts
+- [x] **v0.4 development milestone (included in v0.5.0)**: owner admin page (seat management, key generation, account binding, limits and usage); plugin store release assets and registry entry
 
 ## 📜 Disclaimer
 

@@ -4,29 +4,15 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-17
+
+本次首次提供正式安装包，同时包含此前 0.4 开发阶段已完成的管理功能。
+
 ### 新增
 
 - 0.5 请求监控页面 `/monitor` 与 `/api/monitor`：当前 Key 的调用、成功率、失败、Token、模型汇总与近期记录；支持 1 小时 / 24 小时 / 7 天、成功 / 失败筛选，每 10 秒刷新，最多显示 500 条记录。
 - 请求监控严格按服务端认证后的 Key 查询；仅返回请求模型与白名单统计字段，不返回账号、其他 Key、请求内容或上游错误。过期与无效 Key 拒绝访问，数据库不可用返回明确提示。
 - 浏览器切换 Key、退出或读取失败时清空旧数据；防止较早请求覆盖新 Key 的结果，后台页面暂停轮询。
-
-### 变更
-
-- 买家 Portal 与管理页加宽至 1440px；Portal 的席位、额度、历史用量并排展示，客户端配置默认折叠，手机自动单列。
-- 监控看板自适应宽屏与手机；页面禁止被嵌入并禁用缓存，所有资源均由插件内置。
-- Token 历史与监控共用标准化输入 / 缓存读取算法，监控只读现有 Manager Plus 数据，不新增采集进程。
-
-### 性能与隔离
-
-- 当前 Key 的近期记录缓存 10 秒、汇总缓存 30 秒，页面分别显示更新时间；合并相同并发查询，复用连接，汇总与模型统计合并成一次扫描。
-- 缓存绑定 Key hash、筛选条件、配置快照与数据库文件身份；鉴权不缓存，配置更新取消旧查询并清空缓存，返回前再次检查有效期与撤销状态。
-- 缓存数据上限 20 MiB，LRU 淘汰；全插件同时执行的监控数据查询最多 2 条，排队与执行共用 3 秒期限，失败刷新退避。
-- 增加幂等数据库索引脚本、隔离与缓存并发测试、可复现的百万条 HTTP 压测；插件仍只读数据库。
-
-## [0.4.0] - 待发布
-
-### 新增
-
 - 车主管理页面 `GET /v0/resource/plugins/<插件ID>/admin`：凭 CPA 管理密钥登录，增删改席位、生成随机 key、从 CPA 已加载的账号中选择绑定、设置租期与限额，查看账号加载 / 冷却状态、限额使用与历史用量，复制买家 Portal 链接。
 - 管理页面保存时先由插件按严格规则校验，再通过 CPA 的 `/v8/management/config` 接口依次撤销被删除的 key、写入 `plugins.configs.<插件ID>`、加入新 key，写回 `config.yaml` 后由 CPA 自动重载。
 - 管理接口（挂在 CPA Management API 下，需要管理密钥）：`GET /v0/management/carpool/overview`、`GET /v0/management/carpool/auths`、`POST /v0/management/carpool/validate`。
@@ -36,6 +22,9 @@
 
 ### 变更
 
+- 买家 Portal 与管理页加宽至 1440px；Portal 的席位、额度、历史用量并排展示，客户端配置默认折叠，手机自动单列。
+- 监控看板自适应宽屏与手机；页面禁止被嵌入并禁用缓存，所有资源均由插件内置。
+- Token 历史与监控共用标准化输入 / 缓存读取算法，监控只读现有 Manager Plus 数据，不新增采集进程。
 - Release 的校验文件由 `SHA256SUMS` 改名为 `checksums.txt`，同时覆盖 zip 与 tar.gz。
 - 未设置任何席位限额时，不注册请求拦截与完成通知，减少无用的插件调用。
 - 更新 README 截图与架构图。
@@ -52,6 +41,13 @@
 - 修复首次配置没有 `users` 字段时无法保存席位的问题；无效的默认限额不再被静默改成不限。
 - 用量数据库缺失或路径指向目录时不再显示已找到数据库，支持包含空格和 `#` 的数据库路径。
 - 增加管理页行为回归测试，并纳入 CI 和 Release 检查。
+
+### 性能与隔离
+
+- 当前 Key 的近期记录缓存 10 秒、汇总缓存 30 秒，页面分别显示更新时间；合并相同并发查询，复用连接，汇总与模型统计合并成一次扫描。
+- 缓存绑定 Key hash、筛选条件、配置快照与数据库文件身份；鉴权不缓存，配置更新取消旧查询并清空缓存，返回前再次检查有效期与撤销状态。
+- 缓存数据上限 20 MiB，LRU 淘汰；全插件同时执行的监控数据查询最多 2 条，排队与执行共用 3 秒期限，失败刷新退避。
+- 增加幂等数据库索引脚本、隔离与缓存并发测试、可复现的百万条 HTTP 压测；插件仍只读数据库。
 
 ## [0.3.0] - 2026-10-17
 
@@ -116,8 +112,8 @@
 
 - 独立原型（Python + Caddy），验证倒计时算法、一键核销与字段脱敏。该原型未包含在本仓库中。
 
-[Unreleased]: https://github.com/212duo/cpa-plugin-carpool/compare/7e45ad9...codex/private-request-monitor
-[0.4.0]: https://github.com/212duo/cpa-plugin-carpool/commit/7e45ad9
+[Unreleased]: https://github.com/212duo/cpa-plugin-carpool/compare/v0.5.0...main
+[0.5.0]: https://github.com/212duo/cpa-plugin-carpool/releases/tag/v0.5.0
 [0.3.0]: https://github.com/212duo/cpa-plugin-carpool/commit/f05b126
-[0.2.0]: https://github.com/212duo/cpa-plugin-carpool/releases/tag/v0.2.0
+[0.2.0]: https://github.com/212duo/cpa-plugin-carpool/commits/main
 [0.1.0]: https://github.com/212duo/cpa-plugin-carpool/commits/main

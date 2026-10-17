@@ -48,7 +48,7 @@ jobs:
           mkdir -p "dist/$name"
           cp out/cpa-carpool.so LICENSE README.md README.en.md CHANGELOG.md SPEC.md config.example.yaml "dist/$name/"
           mkdir -p "dist/$name/docs" "dist/$name/scripts"
-          cp -r docs/images docs/benchmarks "dist/$name/docs/"
+          cp -r docs/images docs/benchmarks docs/releases "dist/$name/docs/"
           cp docs/monitor-performance.md "dist/$name/docs/"
           cp scripts/usage-monitor-index.sql "dist/$name/scripts/"
           sh scripts/third_party_licenses.sh "dist/$name/third_party_licenses"
@@ -85,13 +85,17 @@ jobs:
       - name: Checksums
         run: cd dist && sha256sum *.zip *.tar.gz > checksums.txt
 
-      - name: Release notes from CHANGELOG.md
+      - name: Release notes
         run: |
           version="${GITHUB_REF_NAME#v}"
-          awk -v ver="$version" '
-            /^## \[/ { if (found) exit; if (index($0, "## [" ver "]") == 1) { found = 1; next } }
-            found { print }
-          ' CHANGELOG.md > notes.md
+          if [ -f "docs/releases/v$version.md" ]; then
+            cp "docs/releases/v$version.md" notes.md
+          else
+            awk -v ver="$version" '
+              /^## \[/ { if (found) exit; if (index($0, "## [" ver "]") == 1) { found = 1; next } }
+              found { print }
+            ' CHANGELOG.md > notes.md
+          fi
           [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
 
       - name: Create GitHub release
