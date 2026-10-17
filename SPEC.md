@@ -3,7 +3,7 @@
 > 项目名称：**cpa-plugin-carpool（CPA 拼车管家）**
 > 目标宿主：[router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) v8.0.30+（原生插件 ABI v1）
 > 适用场景：个人与小团队的多租户账号分配、席位共享
-> 当前版本：v0.4.0
+> 当前开发版本：v0.5.0（待发布）
 
 ---
 
@@ -99,12 +99,14 @@
 
 ### 3.3 资源路由（Portal）
 
-CPA 的插件资源路由不需要管理密钥、只接受 GET、按精确路径匹配，因此插件注册四个路由，均位于 `/v0/resource/plugins/<插件ID>/` 下：
+CPA 的插件资源路由不需要管理密钥、只接受 GET、按精确路径匹配，因此插件注册六个路由，均位于 `/v0/resource/plugins/<插件ID>/` 下：
 
 | 路由 | 说明 |
 | :--- | :--- |
 | `GET /portal` | 嵌入式单页（`portal.html`），带 CSP、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff` |
 | `GET /admin` | 嵌入式管理页面（`admin.html`），响应头同上，页面本身不含任何数据（见 3.9） |
+| `GET /monitor` | 当前 Key 请求监控静态页面 |
+| `GET /api/monitor` | 当前 Key 请求监控（见 3.11） |
 | `GET /api/status` | 席位状态（见 3.5） |
 | `GET /api/reset?confirm=1` | 核销一张重置卡并解除冷却；不带 `confirm=1` 返回 400 |
 
@@ -203,6 +205,15 @@ plugins:
 - **接入引导**：在 Portal 前端生成，不新增服务端数据。网关地址取 `public_base_url`，为空时取页面所在源加上 `/v0/resource/plugins/` 之前的路径前缀；模型列表以买家 key 请求同源 `/v1/models`，与席位类型匹配的模型（按 id / owned_by 关键字）排在前面，失败时改为手动输入。模板：Codex CLI（`config.toml` 自定义 provider、`wire_api = "responses"`、环境变量）、Claude Code（`settings.json` 的 `env`）、Cursor（OpenAI Base URL 覆盖步骤）、OpenAI 兼容 / curl。
 - **插件商店**：Release 为每个架构提供 `cpa-carpool_<版本>_linux_<amd64|arm64>.zip`（`cpa-carpool.so` 在 zip 根目录）与 `checksums.txt`（sha256sum 格式，覆盖 zip 与 tar.gz）。CPA 安装到 `plugins/linux/<架构>/cpa-carpool-v<版本>.so`，插件 ID 仍为 `cpa-carpool`。`plugin-store/registry-entry.json` 为提交到 `router-for-me/CLIProxyAPI-Plugins-Store` 的条目，`store_test.go` 按商店规则校验它与 Release 命名。
 
+### 3.11 当前 Key 请求监控
+
+- `/api/monitor` 仅接受 `X-Carpool-Key`，先校验 Key 与席位有效期，拒绝 query key、身份 / 账号 / Key hash 等筛选。时间范围 `range=1h|24h|7d`（默认 24h），`status=all|success|failed`（默认 all），`limit=1..500`（默认 100）。重复或未知参数拒绝。
+- 服务端生成 SHA-256 Key hash，三条 SQL（汇总 / 最多 50 个模型 / 最近请求）均绑定 `api_key_hash = ?` 与时间上下界及状态条件。在同一个只读事务中查询，超时 3 秒，不修改数据库。摘要覆盖完整所选范围，列表截取不影响统计。
+- 响应采用 `MonitorResponse` 类型白名单：`generated_at_ms/range/status/summary/models/events/truncated`。记录不返回数据库 ID、request ID、认证信息、请求正文、原始错误、来源或网络标识；仅使用 `requested_model`，不读取内部 resolved model。模型名限制格式 / 长度，推理和服务字段限制枚举，耗时与 HTTP 码校验范围。字段缺失返回 null 或未记录；必需表结构缺失返回通用 503，无部分数据。
+- 页面 Key 只存在内存，请求头发送，片段在请求前清除。切换 Key / 筛选会中止旧请求，并用代次校验防止旧响应回填；退出或出错时清空数据。每 5 秒刷新，隐藏时暂停，单次网络请求最多 10 秒。
+- 所有页面 `no-store`，`Referrer-Policy: no-referrer`、`X-Frame-Options: DENY`，CSP 限制同源连接、禁止嵌入 / base / 表单提交。监控接口不记录数据库原始错误，以免转换失败时把敏感单元格写入日志。
+- Token 算法复用历史统计；不提供没有可靠来源的费用、原始错误详情或跨 Key 聚合。数据来自已有 Manager Plus 采集，延迟与保留范围由采集器决定。
+
 ---
 
 ## 4. 实施阶段
@@ -214,3 +225,4 @@ plugins:
 | **Phase 3** | Go 原生插件 | CPA v8 插件 ABI、宿主回调、测试与 CI | 已完成 ✅（v0.2.0） |
 | **Phase 4** | 限频与接入引导 | 席位并发 / RPM 限制、客户端配置模板 | 已完成 ✅（v0.3.0） |
 | **Phase 5** | 管理界面与插件商店 | 席位管理页面、管理接口、商店发布物与 registry 条目 | 功能已实现，v0.4.0 待发布；商店收录需单独提交 |
+| **Phase 6** | 请求监控与宽屏页面 | 当前 Key 隔离、请求记录与模型汇总、响应式布局 | 功能已实现，v0.5.0 待发布 |

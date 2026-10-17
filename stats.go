@@ -51,23 +51,9 @@ func readTokenStats(dbPath, keyHash string) (TokenStats, error) {
 // No matching rows is a valid zero; missing or unreadable data is an error.
 func readTokenStatsByHash(dbPath string, keyHashes []string) (map[string]TokenStats, error) {
 	out := make(map[string]TokenStats, len(keyHashes))
-	dbPath = resolveUsageDB(dbPath)
-	if dbPath == "" {
-		return nil, errUsageDBUnavailable
-	}
-
-	absPath, err := filepath.Abs(dbPath)
+	db, err := openUsageDB(dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolve usage database: %w", err)
-	}
-	uriPath := filepath.ToSlash(absPath)
-	if filepath.VolumeName(absPath) != "" && !strings.HasPrefix(uriPath, "/") {
-		uriPath = "/" + uriPath
-	}
-	dsn := (&url.URL{Scheme: "file", Path: uriPath, RawQuery: "mode=ro"}).String()
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open usage database: %w", err)
+		return nil, err
 	}
 	defer db.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -81,27 +67,7 @@ func readTokenStatsByHash(dbPath string, keyHashes []string) (map[string]TokenSt
 			return nil, fmt.Errorf("usage_events is missing required column %s", name)
 		}
 	}
-	input := "coalesce(input_tokens, 0)"
-	if columns["normalized_total_input_tokens"] {
-		input = "coalesce(normalized_total_input_tokens, input_tokens, 0)"
-	}
-	// New Manager Plus versions distinguish cache reads and cache creation;
-	// cached_tokens can contain both and must not be labelled a cache hit.
-	cached := "coalesce(cached_tokens, 0)"
-	if columns["cache_read_tokens"] {
-		legacy := cached
-		if columns["cache_tokens"] {
-			legacy = "max(" + legacy + ", coalesce(cache_tokens, 0))"
-		}
-		creation := "0"
-		if columns["cache_creation_tokens"] {
-			creation = "coalesce(cache_creation_tokens, 0)"
-		}
-		cached = "case when coalesce(cache_read_tokens, 0) > 0 or " + creation + " > 0 then coalesce(cache_read_tokens, 0) else " + legacy + " end"
-	}
-	if columns["normalized_cache_read_tokens"] {
-		cached = "coalesce(normalized_cache_read_tokens, " + cached + ")"
-	}
+	input, cached := usageTokenExpressions(columns)
 	if len(keyHashes) == 0 {
 		return out, nil
 	}
@@ -139,6 +105,55 @@ func readTokenStatsByHash(dbPath string, keyHashes []string) (map[string]TokenSt
 		return nil, fmt.Errorf("read usage rows: %w", err)
 	}
 	return out, nil
+}
+
+// openUsageDB never creates or writes a database, including paths with URI characters.
+func openUsageDB(dbPath string) (*sql.DB, error) {
+	dbPath = resolveUsageDB(dbPath)
+	if dbPath == "" {
+		return nil, errUsageDBUnavailable
+	}
+
+	absPath, err := filepath.Abs(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve usage database: %w", err)
+	}
+	uriPath := filepath.ToSlash(absPath)
+	if filepath.VolumeName(absPath) != "" && !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	dsn := (&url.URL{Scheme: "file", Path: uriPath, RawQuery: "mode=ro"}).String()
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open usage database: %w", err)
+	}
+	return db, nil
+}
+
+// usageTokenExpressions shares Manager Plus normalization between history and monitoring.
+func usageTokenExpressions(columns map[string]bool) (input, cached string) {
+	input = "coalesce(input_tokens, 0)"
+	if columns["normalized_total_input_tokens"] {
+		input = "coalesce(normalized_total_input_tokens, input_tokens, 0)"
+	}
+	// New Manager Plus versions distinguish cache reads and cache creation;
+	// cached_tokens can contain both and must not be labelled a cache hit.
+	cached = "coalesce(cached_tokens, 0)"
+	if columns["cache_read_tokens"] {
+		legacy := cached
+		if columns["cache_tokens"] {
+			legacy = "max(" + legacy + ", coalesce(cache_tokens, 0))"
+		}
+		creation := "0"
+		if columns["cache_creation_tokens"] {
+			creation = "coalesce(cache_creation_tokens, 0)"
+		}
+		cached = "case when coalesce(cache_read_tokens, 0) > 0 or " + creation + " > 0 then coalesce(cache_read_tokens, 0) else " + legacy + " end"
+	}
+	if columns["normalized_cache_read_tokens"] {
+		cached = "coalesce(normalized_cache_read_tokens, " + cached + ")"
+	}
+	return input, cached
 }
 
 func usageColumns(ctx context.Context, db *sql.DB) (map[string]bool, error) {

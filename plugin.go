@@ -66,6 +66,8 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 					Menu:        "拼车管家",
 					Description: "买家自助页面：额度与刷新倒计时、重置卡核销、客户端接入配置",
 				},
+				{Path: RouteMonitor, Menu: "拼车管家 · 请求监控", Description: "仅查看当前 Key 的请求状态、Token 与耗时"},
+				{Path: RouteAPIMonitor, Description: "当前 Key 的请求监控接口"},
 				{
 					Path:        RouteAdmin,
 					Menu:        "拼车管家 · 管理",

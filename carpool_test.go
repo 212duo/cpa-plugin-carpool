@@ -374,7 +374,7 @@ func TestManagementRegisterListsAllPortalRoutes(t *testing.T) {
 	for _, r := range reg.Resources {
 		got[r.Path] = true
 	}
-	for _, p := range []string{RoutePortal, RouteAPIStatus, RouteAPIReset} {
+	for _, p := range []string{RoutePortal, RouteAPIStatus, RouteAPIReset, RouteMonitor, RouteAPIMonitor} {
 		if !got[p] {
 			t.Errorf("resource %s is not registered", p)
 		}

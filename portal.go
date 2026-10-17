@@ -17,6 +17,9 @@ import (
 //go:embed portal.html
 var embeddedPortalHTML []byte
 
+//go:embed monitor.html
+var embeddedMonitorHTML []byte
+
 // resetMu serializes reset credit redemptions so a double click never redeems twice.
 var resetMu sync.Mutex
 
@@ -45,6 +48,12 @@ func handleResource(req pluginapi.ManagementRequest, table *routingTable, cfg Pl
 			Body:       embeddedPortalHTML,
 		})
 
+	case RouteMonitor:
+		return okEnvelope(pluginapi.ManagementResponse{StatusCode: http.StatusOK, Headers: pageHeaders(), Body: embeddedMonitorHTML})
+
+	case RouteAPIMonitor:
+		return handleAPIMonitor(req, table, cfg)
+
 	case RouteAdmin:
 		return serveAdminPage()
 
@@ -67,10 +76,11 @@ func handleResource(req pluginapi.ManagementRequest, table *routingTable, cfg Pl
 func pageHeaders() http.Header {
 	return http.Header{
 		"Content-Type":            []string{"text/html; charset=utf-8"},
-		"Cache-Control":           []string{"no-cache"},
+		"Cache-Control":           []string{"no-store"},
 		"Referrer-Policy":         []string{"no-referrer"},
 		"X-Content-Type-Options":  []string{"nosniff"},
-		"Content-Security-Policy": []string{"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'"},
+		"X-Frame-Options":         []string{"DENY"},
+		"Content-Security-Policy": []string{"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"},
 	}
 }
 

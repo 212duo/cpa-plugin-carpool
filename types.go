@@ -6,7 +6,7 @@ import (
 )
 
 // PluginVersion is the semantic release version of the carpool plugin.
-const PluginVersion = "0.4.0"
+const PluginVersion = "0.5.0"
 
 // PluginSchemaVersion is the RPC contract version declared at plugin.register.
 // Version 2 adds request.complete, which the concurrency limit needs; version 6
@@ -23,10 +23,12 @@ const DefaultUpstreamUserAgent = "codex_cli_rs/0.160.0 (x86_64-unknown-linux-gnu
 
 // Resource route paths under /v0/resource/plugins/<plugin-id>/
 const (
-	RoutePortal    = "/portal"
-	RouteAPIStatus = "/api/status"
-	RouteAPIReset  = "/api/reset"
-	RouteAdmin     = "/admin"
+	RoutePortal     = "/portal"
+	RouteAPIStatus  = "/api/status"
+	RouteAPIReset   = "/api/reset"
+	RouteAdmin      = "/admin"
+	RouteMonitor    = "/monitor"
+	RouteAPIMonitor = "/api/monitor"
 )
 
 // Management API route paths under /v0/management/. CPA serves them only to
