@@ -208,9 +208,11 @@ plugins:
 ### 3.11 当前 Key 请求监控
 
 - `/api/monitor` 仅接受 `X-Carpool-Key`，先校验 Key 与席位有效期，拒绝 query key、身份 / 账号 / Key hash 等筛选。时间范围 `range=1h|24h|7d`（默认 24h），`status=all|success|failed`（默认 all），`limit=1..500`（默认 100）。重复或未知参数拒绝。
-- 服务端生成 SHA-256 Key hash，三条 SQL（汇总 / 最多 50 个模型 / 最近请求）均绑定 `api_key_hash = ?` 与时间上下界及状态条件。在同一个只读事务中查询，超时 3 秒，不修改数据库。摘要覆盖完整所选范围，列表截取不影响统计。
-- 响应采用 `MonitorResponse` 类型白名单：`generated_at_ms/range/status/summary/models/events/truncated`。记录不返回数据库 ID、request ID、认证信息、请求正文、原始错误、来源或网络标识；仅使用 `requested_model`，不读取内部 resolved model。模型名限制格式 / 长度，推理和服务字段限制枚举，耗时与 HTTP 码校验范围。字段缺失返回 null 或未记录；必需表结构缺失返回通用 503，无部分数据。
-- 页面 Key 只存在内存，请求头发送，片段在请求前清除。切换 Key / 筛选会中止旧请求，并用代次校验防止旧响应回填；退出或出错时清空数据。每 5 秒刷新，隐藏时暂停，单次网络请求最多 10 秒。
+- 服务端生成 SHA-256 Key hash，两条 SQL（单次分组扫描同时生成汇总与最多 50 个模型 / 最近请求）均绑定 `api_key_hash = ?` 与时间上下界及状态条件。每条查询各自读取一致快照；汇总与记录允许按独立缓存周期更新，使用 `summary_at_ms` 与 `generated_at_ms` 区分。排队和执行共用 3 秒期限，不修改数据库。摘要覆盖完整所选范围，列表截取不影响统计。
+- 响应采用 `MonitorResponse` 类型白名单：`generated_at_ms/summary_at_ms/range/status/summary/models/events/truncated`。记录不返回数据库 ID、request ID、认证信息、请求正文、原始错误、来源或网络标识；仅使用 `requested_model`，不读取内部 resolved model。模型名限制格式 / 长度，推理和服务字段限制枚举，耗时与 HTTP 码校验范围。字段缺失返回 null 或未记录；必需表结构缺失返回通用 503，无部分数据。
+- 页面 Key 只存在内存，请求头发送，片段在请求前清除。切换 Key / 筛选会中止旧请求，并用代次校验防止旧响应回填；退出或出错时清空数据。每 10 秒刷新，隐藏时暂停，单次网络请求最多 10 秒。
+- 配置快照拥有独立连接池与缓存；键包含数据库文件身份、配置摘要、SHA-256 Key hash、范围、状态、列表长度。记录缓存 10 秒 / 256 项 / 16 MiB，汇总缓存 30 秒 / 512 项 / 4 MiB；仅汇总忽略列表长度。缓存复制字节，TTL 到期不滑动续期，LRU 淘汰并合并相同在途请求；不缓存失败。配置切换取消旧查询、清缓存，发送前再校验当前 Key，文件缺失 / 更换不能命中旧结果。
+- 全插件最多同时执行 2 条监控数据查询，每级最多 128 个不同查询在途，连接池最多 2 个连接；无后台采集。`scripts/usage-monitor-index.sql` 提供幂等复合索引，由数据库写入方执行，插件不自动写库。失败轮询退避至 20 / 40 / 60 秒。
 - 所有页面 `no-store`，`Referrer-Policy: no-referrer`、`X-Frame-Options: DENY`，CSP 限制同源连接、禁止嵌入 / base / 表单提交。监控接口不记录数据库原始错误，以免转换失败时把敏感单元格写入日志。
 - Token 算法复用历史统计；不提供没有可靠来源的费用、原始错误详情或跨 Key 聚合。数据来自已有 Manager Plus 采集，延迟与保留范围由采集器决定。
 

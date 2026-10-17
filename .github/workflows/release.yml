@@ -46,8 +46,11 @@ jobs:
         run: |
           name="cpa-carpool_${GITHUB_REF_NAME#v}_linux_${{ matrix.arch }}"
           mkdir -p "dist/$name"
-          cp out/cpa-carpool.so LICENSE README.md README.en.md CHANGELOG.md config.example.yaml "dist/$name/"
-          mkdir -p "dist/$name/docs" && cp -r docs/images "dist/$name/docs/"
+          cp out/cpa-carpool.so LICENSE README.md README.en.md CHANGELOG.md SPEC.md config.example.yaml "dist/$name/"
+          mkdir -p "dist/$name/docs" "dist/$name/scripts"
+          cp -r docs/images docs/benchmarks "dist/$name/docs/"
+          cp docs/monitor-performance.md "dist/$name/docs/"
+          cp scripts/usage-monitor-index.sql "dist/$name/scripts/"
           sh scripts/third_party_licenses.sh "dist/$name/third_party_licenses"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           # CLIProxyAPI's plugin store installs <id>_<version>_<goos>_<goarch>.zip

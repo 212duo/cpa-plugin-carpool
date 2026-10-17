@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -49,6 +47,7 @@ type MonitorEvent struct {
 }
 
 type MonitorResponse struct {
+	SummaryAtMS   int64          `json:"summary_at_ms"`
 	GeneratedAtMS int64          `json:"generated_at_ms"`
 	Range         string         `json:"range"`
 	Status        string         `json:"status"`
@@ -113,99 +112,116 @@ func handleAPIMonitor(req pluginapi.ManagementRequest, table *routingTable, cfg 
 	if err != nil {
 		return jsonResponse(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
-	result, err := readMonitor(cfg.DBPath, usageKeyHash(key), o, time.Now())
+	result, err := table.monitor.get(table.configRevision, usageKeyHash(key), o)
 	if err != nil {
 		// Do not log SQLite errors: an invalid cell may put private values in errors.
 		logf("warn", "request monitoring data is unavailable")
 		return jsonResponse(http.StatusServiceUnavailable, map[string]string{"error": "请求记录暂不可用，请联系车主检查用量采集与数据库配置"})
 	}
-	return jsonResponse(http.StatusOK, result)
+	// Authentication is never cached. Reject revoked or expired keys even if a
+	// query or cache hit began before the routing configuration changed.
+	current := activeTable.Load()
+	if buyer, status, message := lookupSeat(current, key); buyer == nil {
+		return jsonResponse(status, map[string]string{"error": message})
+	}
+	if current != table {
+		return jsonResponse(http.StatusServiceUnavailable, map[string]string{"error": "配置已更新，请重试"})
+	}
+	return okEnvelope(pluginapi.ManagementResponse{StatusCode: http.StatusOK, Headers: http.Header{"Content-Type": {"application/json"}, "Cache-Control": {"no-store"}}, Body: result})
 }
 
-func readMonitor(dbPath, keyHash string, o monitorOptions, now time.Time) (MonitorResponse, error) {
-	out := MonitorResponse{GeneratedAtMS: now.UnixMilli(), Range: o.rangeName, Status: o.status, Models: []MonitorModel{}, Events: []MonitorEvent{}}
-	db, err := openUsageDB(dbPath)
-	if err != nil {
-		return out, err
-	}
-	defer db.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	columns, err := usageColumns(ctx, db)
-	if err != nil {
-		return out, err
-	}
-	for _, name := range []string{"id", "timestamp_ms", "api_key_hash", "failed", "input_tokens", "output_tokens", "cached_tokens", "total_tokens"} {
-		if !columns[name] {
-			return out, fmt.Errorf("unsupported usage schema")
-		}
-	}
-	input, cached := usageTokenExpressions(columns)
-	optional := func(name, fallback string) string {
+// Summary/model aggregation scans the key's time range once. Window totals
+// cover all model groups, including those outside the displayed top 50.
+type monitorAggregate struct {
+	AtMS    int64          `json:"at_ms"`
+	Summary MonitorTotals  `json:"summary"`
+	Models  []MonitorModel `json:"models"`
+}
+
+func monitorSQL(columns map[string]bool, keyHash string, o monitorOptions, now time.Time) (model, input, cached, latency, ttft, where string, args []any) {
+	input, cached = usageTokenExpressions(columns)
+	optional := func(name string) string {
 		if columns[name] {
 			return name
 		}
-		return fallback
+		return "NULL"
 	}
-	// Only the client-requested model may be displayed. Resolved models and
-	// provider/auth labels can contain internal routing details.
-	model := "coalesce(substr(" + optional("requested_model", "NULL") + ", 1, 129), '')"
-	latency := "case when " + optional("latency_ms", "NULL") + " between 0 and 86400000 then latency_ms else null end"
-	if !columns["latency_ms"] {
-		latency = "NULL"
+	model = "coalesce(substr(" + optional("requested_model") + ",1,129),'')"
+	latency = "NULL"
+	if columns["latency_ms"] {
+		latency = "case when latency_ms between 0 and 86400000 then latency_ms else null end"
 	}
-	ttft := "case when " + optional("ttft_ms", "NULL") + " between 0 and 86400000 then ttft_ms else null end"
-	if !columns["ttft_ms"] {
-		ttft = "NULL"
+	ttft = "NULL"
+	if columns["ttft_ms"] {
+		ttft = "case when ttft_ms between 0 and 86400000 then ttft_ms else null end"
 	}
-	where := " from usage_events where api_key_hash = ? and timestamp_ms >= ? and timestamp_ms <= ?"
-	args := []any{keyHash, now.Add(-o.window).UnixMilli(), now.UnixMilli()}
+	where = " from usage_events where api_key_hash = ? and timestamp_ms >= ? and timestamp_ms <= ?"
+	args = []any{keyHash, now.Add(-o.window).UnixMilli(), now.UnixMilli()}
 	if o.status == "success" {
-		where += " and coalesce(failed,0) = 0"
+		where += " and coalesce(failed,0)=0"
 	} else if o.status == "failed" {
-		where += " and coalesce(failed,0) != 0"
+		where += " and coalesce(failed,0)!=0"
 	}
-	aggregate := "count(*), coalesce(sum(case when coalesce(failed,0)=0 then 1 else 0 end),0), coalesce(sum(case when coalesce(failed,0)!=0 then 1 else 0 end),0), coalesce(sum(" + input + "),0), coalesce(sum(output_tokens),0), coalesce(sum(" + cached + "),0), coalesce(sum(total_tokens),0), avg(" + latency + ")"
-	// One SQLite snapshot keeps summaries and rows consistent while the collector writes.
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	return
+}
+
+func monitorTotalDest(t *MonitorTotals) []any {
+	return []any{&t.Calls, &t.Successes, &t.Failures, &t.InputTokens, &t.OutputTokens, &t.CachedTokens, &t.TotalTokens, &t.AvgLatencyMS}
+}
+
+func readMonitorAggregate(ctx context.Context, d *monitorDatabase, keyHash string, o monitorOptions, now time.Time) (monitorAggregate, error) {
+	a := monitorAggregate{AtMS: now.UnixMilli(), Models: []MonitorModel{}}
+	model, input, cached, latency, _, where, args := monitorSQL(d.columns, keyHash, o, now)
+	query := `with grouped as (
+		select ` + model + ` as requested, count(*) as calls,
+		coalesce(sum(case when coalesce(failed,0)=0 then 1 else 0 end),0) as successes,
+		coalesce(sum(case when coalesce(failed,0)!=0 then 1 else 0 end),0) as failures,
+		coalesce(sum(` + input + `),0) as inputs, coalesce(sum(output_tokens),0) as outputs,
+		coalesce(sum(` + cached + `),0) as cached, coalesce(sum(total_tokens),0) as total,
+		coalesce(sum(` + latency + `),0) as elapsed, count(` + latency + `) as timed
+		` + where + ` group by ` + model + `
+	) select requested,calls,successes,failures,inputs,outputs,cached,total,
+		1.0*elapsed/nullif(timed,0),
+		sum(calls) over(),sum(successes) over(),sum(failures) over(),sum(inputs) over(),
+		sum(outputs) over(),sum(cached) over(),sum(total) over(),
+		1.0*sum(elapsed) over()/nullif(sum(timed) over(),0)
+	from grouped order by calls desc,requested limit 50`
+	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return out, err
+		return a, err
 	}
-	defer tx.Rollback()
-	totalDest := func(t *MonitorTotals) []any {
-		return []any{&t.Calls, &t.Successes, &t.Failures, &t.InputTokens, &t.OutputTokens, &t.CachedTokens, &t.TotalTokens, &t.AvgLatencyMS}
-	}
-	if err = tx.QueryRowContext(ctx, "select "+aggregate+where, args...).Scan(totalDest(&out.Summary)...); err != nil {
-		return out, err
-	}
-	rows, err := tx.QueryContext(ctx, "select "+model+", "+aggregate+where+" group by "+model+" order by count(*) desc, 1 limit 50", args...)
-	if err != nil {
-		return out, err
-	}
+	defer rows.Close()
 	for rows.Next() {
 		var m MonitorModel
-		if err = rows.Scan(append([]any{&m.Model}, totalDest(&m.MonitorTotals)...)...); err != nil {
-			rows.Close()
-			return out, err
+		dest := append([]any{&m.Model}, monitorTotalDest(&m.MonitorTotals)...)
+		dest = append(dest, monitorTotalDest(&a.Summary)...)
+		if err = rows.Scan(dest...); err != nil {
+			return a, err
 		}
 		m.Model = safeRequestedModel(m.Model)
-		out.Models = append(out.Models, m)
+		a.Models = append(a.Models, m)
 	}
-	err = rows.Err()
-	rows.Close()
+	return a, rows.Err()
+}
+
+func readMonitorEvents(ctx context.Context, d *monitorDatabase, keyHash string, o monitorOptions, now time.Time, out *MonitorResponse) error {
+	model, input, cached, latency, ttft, where, args := monitorSQL(d.columns, keyHash, o, now)
+	optional := func(name string) string {
+		if d.columns[name] {
+			return name
+		}
+		return "NULL"
+	}
+	query := "select timestamp_ms, " + model + ", coalesce(substr(" + optional("reasoning_effort") + ",1,32),''), coalesce(substr(" + optional("service_tier") + ",1,32),''), coalesce(failed,0)!=0, " + optional("fail_status_code") + ", " + input + ", coalesce(output_tokens,0), " + cached + ", coalesce(total_tokens,0), " + latency + ", " + ttft + where + " order by timestamp_ms desc,id desc limit ?"
+	rows, err := d.db.QueryContext(ctx, query, append(args, o.limit+1)...)
 	if err != nil {
-		return out, err
+		return err
 	}
-	query := "select timestamp_ms, " + model + ", coalesce(substr(" + optional("reasoning_effort", "NULL") + ",1,32),''), coalesce(substr(" + optional("service_tier", "NULL") + ",1,32),''), coalesce(failed,0)!=0, " + optional("fail_status_code", "NULL") + ", " + input + ", coalesce(output_tokens,0), " + cached + ", coalesce(total_tokens,0), " + latency + ", " + ttft + where + " order by timestamp_ms desc, id desc limit ?"
-	rows, err = tx.QueryContext(ctx, query, append(args, o.limit+1)...)
-	if err != nil {
-		return out, err
-	}
+	defer rows.Close()
 	for rows.Next() {
 		var e MonitorEvent
 		if err = rows.Scan(&e.TimestampMS, &e.Model, &e.Reasoning, &e.ServiceTier, &e.Failed, &e.StatusCode, &e.InputTokens, &e.OutputTokens, &e.CachedTokens, &e.TotalTokens, &e.LatencyMS, &e.TTFTMS); err != nil {
-			rows.Close()
-			return out, err
+			return err
 		}
 		e.Model = safeRequestedModel(e.Model)
 		e.Reasoning = monitorEnum(e.Reasoning, "none", "minimal", "low", "medium", "high", "xhigh", "max", "auto")
@@ -215,16 +231,34 @@ func readMonitor(dbPath, keyHash string, o monitorOptions, now time.Time) (Monit
 		}
 		out.Events = append(out.Events, e)
 	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return out, err
+	if err = rows.Err(); err != nil {
+		return err
 	}
 	if len(out.Events) > o.limit {
 		out.Events = out.Events[:o.limit]
 		out.Truncated = true
 	}
-	return out, tx.Commit()
+	return nil
+}
+
+// Uncached entry point retained for schema/accounting tests and load comparisons.
+func readMonitor(dbPath, keyHash string, o monitorOptions, now time.Time) (MonitorResponse, error) {
+	s := newMonitorService(dbPath)
+	defer s.close()
+	ctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
+	defer cancel()
+	d, err := s.acquire(ctx)
+	if err != nil {
+		return MonitorResponse{}, err
+	}
+	defer s.release(d)
+	a, err := readMonitorAggregate(ctx, d, keyHash, o, now)
+	if err != nil {
+		return MonitorResponse{}, err
+	}
+	out := MonitorResponse{GeneratedAtMS: now.UnixMilli(), SummaryAtMS: now.UnixMilli(), Range: o.rangeName, Status: o.status, Summary: a.Summary, Models: a.Models, Events: []MonitorEvent{}}
+	err = readMonitorEvents(ctx, d, keyHash, o, now, &out)
+	return out, err
 }
 
 var publicModelPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$`)

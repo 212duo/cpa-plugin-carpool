@@ -63,6 +63,8 @@ users:
     primary: [claude-demo.json]
     expire-at: '2020-01-01T00:00:00Z'
 `)
+	service := activeTable.Load().monitor
+	t.Cleanup(service.close)
 	return path, db
 }
 

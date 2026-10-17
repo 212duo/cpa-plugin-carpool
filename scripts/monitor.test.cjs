@@ -37,7 +37,7 @@ test('monitor uses header credentials and removes share fragment before loading'
   assert.equal(p.requests[0].options.credentials,'omit');
   assert.match(p.node('models').innerHTML,/gpt-demo/);
   assert(p.timers.size===1);
-  assert.equal([...p.timers.values()][0].delay,5000);
+  assert.equal([...p.timers.values()][0].delay,10000);
 });
 
 test('late response from a previous key cannot repopulate private data',async()=>{
@@ -85,4 +85,15 @@ test('hidden pages stop polling and status changes clear stale totals',async()=>
   assert.doesNotMatch(p.node('events').innerHTML,/gpt-demo/);await tick();
   assert.match(p.requests.at(-1).url,/status=failed/);
   p.events.pagehide();assert.equal(p.run('currentKey'),'');assert.equal(p.timers.size,0);
+});
+
+test('failed polling backs off and success restores the normal interval',async()=>{
+  let fail=true;
+  const p=page(async()=>response(fail?{error:'unavailable'}:result(),fail?503:200));
+  p.node('keyInput').value='sk-demo';p.run('connect()');await tick();
+  assert.equal([...p.timers.values()][0].delay,20000);
+  await p.run('refresh()');assert.equal([...p.timers.values()][0].delay,40000);
+  await p.run('refresh()');assert.equal([...p.timers.values()][0].delay,60000);
+  fail=false;await p.run('refresh()');assert.equal([...p.timers.values()][0].delay,10000);
+  assert.match(p.node('updated').textContent,/汇总/);
 });

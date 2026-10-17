@@ -198,7 +198,7 @@ An auth ID is the account's credential file path **relative to CPA's auth direct
 
 ### Request monitoring (0.5)
 
-Click the monitoring button in the Portal, or open `https://your-domain/v0/resource/plugins/cpa-carpool/monitor` with your client key. Filter the last 1 hour / 24 hours / 7 days and successful / failed requests, inspect model summaries and the latest 100 / 500 records. The page refreshes every 5 seconds, pauses in background tabs, and supports horizontal table scrolling on phones.
+Click the monitoring button in the Portal, or open `https://your-domain/v0/resource/plugins/cpa-carpool/monitor` with your client key. Filter the last 1 hour / 24 hours / 7 days and successful / failed requests, inspect model summaries and the latest 100 / 500 records. The page refreshes every 10 seconds, pauses in background tabs, and supports horizontal table scrolling on phones.
 
 ![Request monitoring with demo data](docs/images/monitor.png)
 
@@ -206,6 +206,22 @@ Click the monitoring button in the Portal, or open `https://your-domain/v0/resou
 * **Minimal fields:** requested model, reasoning / service enums, success / failure, HTTP error code, tokens, first-token / total latency and timestamp. Account emails, auth files, keys / hashes, raw errors, request / response content, IPs and trace IDs are excluded. Missing requested models display an unavailable label; internal resolved models are never substituted.
 * **Data source:** the same Manager Plus usage database described below. Only collected records appear, potentially with delay; in-flight and uncollected requests are unavailable. Costs are omitted until reliable pricing is available. Output TPS is estimated as output tokens / (total latency − first-token latency); missing or invalid values show `--`.
 * **Access:** the monitoring API accepts only the `X-Carpool-Key` header. Page share links may use `#key=...`, never `?key=`. The page removes credentials from its address, keeps the key in memory, avoids browser storage, and clears data on key changes or logout. Use HTTPS for public access and protect share links.
+
+#### Resource use and database index
+
+Recent records are cached for 10 seconds; summaries and model groups for 30 seconds, with separate timestamps. Aggregates may be shared between list limits only for the same verified key, range and status. Keys never share cached results. Current authorization and expiry are checked before and after reading data; reconfiguration drops caches and cancels old queries. Errors are not cached and expired data is never used as a fallback.
+
+Concurrent identical requests are coalesced, database connections are reused, and at most two monitoring data queries run across the plugin. Waiting and execution share a three-second deadline. The two caches hold at most 20 MiB of JSON data (excluding Go / SQLite and in-flight memory), with 256 response entries and 512 summary entries. Failed polling backs off to 20 / 40 / 60 seconds and returns to 10 seconds after recovery.
+
+**For larger databases, run the index script once from the Manager Plus database's writable side.** The plugin remains read-only and never adds indexes automatically:
+
+```bash
+sqlite3 /actual/path/usage.sqlite < scripts/usage-monitor-index.sql
+```
+
+The index covers `(api_key_hash, timestamp_ms DESC, id DESC)` and the script is idempotent. Building it needs time and extra disk space; use a quiet period. A directory mounted read-only inside CPA cannot create it. Queries still work without the index, but initial aggregation can be slower on large datasets.
+
+See [monitoring performance tests](docs/monitor-performance.md) for the reproducible million-row workload, scenarios and results.
 
 ### Token history
 

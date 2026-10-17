@@ -112,7 +112,10 @@ func configure(raw []byte) {
 	if prev := activeTable.Load(); prev != nil && prev.limited && !table.limited {
 		limiter.reset()
 	}
-	activeTable.Store(table)
+	prev := activeTable.Swap(table)
+	if prev != nil && prev.monitor != nil {
+		prev.monitor.close()
+	}
 }
 
 // loadConfig decodes the lifecycle request of plugin.register / plugin.reconfigure
@@ -154,6 +157,7 @@ func parseConfig(configYAML []byte) (PluginConfig, *routingTable, error) {
 	digest := sha256.Sum256(canonical)
 	table.configRevision = hex.EncodeToString(digest[:])
 	table.config = cfg
+	table.monitor = newMonitorService(cfg.DBPath)
 	return cfg, table, nil
 }
 

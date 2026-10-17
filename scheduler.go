@@ -13,7 +13,8 @@ import (
 )
 
 type routingTable struct {
-	debug bool
+	monitor *monitorService
+	debug   bool
 	// Keep management settings and routing in one immutable, atomic snapshot.
 	config PluginConfig
 	// configRevision identifies the configuration actually used for routing.
