@@ -44,3 +44,32 @@ test("small positive token counts are not rounded to zero", async () => {
   assert.match(html, /当前 Key 历史调用/);
   assert.doesNotMatch(html, /0\.000M/);
 });
+
+test("a delayed Portal response cannot overwrite a different key's data", async () => {
+  const nodes = new Map(), events = {};
+  const node = (id) => {
+    if (!nodes.has(id)) nodes.set(id, { value: "", innerHTML: "", style: {} });
+    return nodes.get(id);
+  };
+  let finish;
+  const response = (name) => ({ ok: true, json: async () => ({ seat_name: name, quota_supported: false, usage_available: true }) });
+  const context = vm.createContext({
+    document: { getElementById: node, addEventListener: (name, fn) => { events[name] = fn; } },
+    window: { location: { pathname: "/v0/resource/plugins/cpa-carpool/portal", origin: "https://example.test" } },
+    fetch: async (_url, opts) => opts.headers["X-Carpool-Key"] === "sk-first" ? new Promise(resolve => { finish = resolve; }) : response("Second seat"),
+    setInterval: () => 0, clearInterval() {},
+  });
+  vm.runInContext(source, context);
+  vm.runInContext("setupGuide = () => {}", context);
+  node("apiKeyInput").value = "sk-first";
+  const first = vm.runInContext("doQuery()", context);
+  node("apiKeyInput").value = "sk-second";
+  await vm.runInContext("doQuery()", context);
+  finish(response("Private first seat"));
+  await first;
+  assert.match(node("resultArea").innerHTML, /Second seat/);
+  assert.doesNotMatch(node("resultArea").innerHTML, /Private first/);
+  events.input({ target: { id: "apiKeyInput" } });
+  assert.equal(node("resultArea").innerHTML, "");
+  assert.equal(vm.runInContext("currentKey", context), "");
+});

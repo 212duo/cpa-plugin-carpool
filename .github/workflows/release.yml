@@ -29,7 +29,7 @@ jobs:
           node-version: '24'
 
       - name: Embedded page behavior
-        run: node --test scripts/admin.test.cjs scripts/portal.test.cjs
+        run: node --test scripts/admin.test.cjs scripts/portal.test.cjs scripts/monitor.test.cjs
 
       - name: Check the tag matches PluginVersion
         run: |
@@ -46,8 +46,11 @@ jobs:
         run: |
           name="cpa-carpool_${GITHUB_REF_NAME#v}_linux_${{ matrix.arch }}"
           mkdir -p "dist/$name"
-          cp out/cpa-carpool.so LICENSE README.md README.en.md CHANGELOG.md config.example.yaml "dist/$name/"
-          mkdir -p "dist/$name/docs" && cp -r docs/images "dist/$name/docs/"
+          cp out/cpa-carpool.so LICENSE README.md README.en.md CHANGELOG.md SPEC.md config.example.yaml "dist/$name/"
+          mkdir -p "dist/$name/docs" "dist/$name/scripts"
+          cp -r docs/images docs/benchmarks docs/releases "dist/$name/docs/"
+          cp docs/monitor-performance.md "dist/$name/docs/"
+          cp scripts/usage-monitor-index.sql "dist/$name/scripts/"
           sh scripts/third_party_licenses.sh "dist/$name/third_party_licenses"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           # CLIProxyAPI's plugin store installs <id>_<version>_<goos>_<goarch>.zip
@@ -82,13 +85,17 @@ jobs:
       - name: Checksums
         run: cd dist && sha256sum *.zip *.tar.gz > checksums.txt
 
-      - name: Release notes from CHANGELOG.md
+      - name: Release notes
         run: |
           version="${GITHUB_REF_NAME#v}"
-          awk -v ver="$version" '
-            /^## \[/ { if (found) exit; if (index($0, "## [" ver "]") == 1) { found = 1; next } }
-            found { print }
-          ' CHANGELOG.md > notes.md
+          if [ -f "docs/releases/v$version.md" ]; then
+            cp "docs/releases/v$version.md" notes.md
+          else
+            awk -v ver="$version" '
+              /^## \[/ { if (found) exit; if (index($0, "## [" ver "]") == 1) { found = 1; next } }
+              found { print }
+            ' CHANGELOG.md > notes.md
+          fi
           [ -s notes.md ] || echo "See CHANGELOG.md." > notes.md
 
       - name: Create GitHub release

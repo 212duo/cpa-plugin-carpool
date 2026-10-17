@@ -26,20 +26,20 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 24px;
+  justify-content: flex-start;
+  padding: 28px;
 }
 .container {
   width: 100%;
-  max-width: 600px;
+  max-width: 1440px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 32px;
+  padding: 28px;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
 }
-h1 { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 8px; color: var(--accent); }
-.desc { font-size: 13px; color: var(--muted); text-align: center; margin-bottom: 24px; }
+h1 { font-size: 25px; font-weight: 700; text-align: left; margin-bottom: 8px; color: var(--accent); }
+.desc { font-size: 13px; color: var(--muted); text-align: left; margin-bottom: 20px; }
 .form-group { display: flex; gap: 8px; margin-bottom: 24px; }
 input[type="text"] {
   flex: 1;
@@ -239,6 +239,20 @@ button.btn-query:hover { background: var(--accent-hover); }
 .alert { padding: 12px 16px; border-radius: 8px; margin-top: 16px; font-size: 13px; }
 .alert-ok { background: rgba(34, 197, 94, 0.15); color: var(--green); border: 1px solid var(--green); }
 .alert-err { background: rgba(239, 68, 68, 0.15); color: var(--red); border: 1px solid var(--red); }
+
+.overview-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.overview-grid .status-card { margin:0; min-width:0; }
+.panel-title { font-size:15px; font-weight:600; margin-bottom:14px; color:var(--accent); }
+.stat-row { gap:12px; flex-wrap:wrap; } .stat-val { overflow-wrap:anywhere; }
+.form-group { max-width:820px; } .form-group input { min-width:0; }
+input[type="password"] { flex:1; min-width:0; background:#0b1120; border:1px solid var(--border); border-radius:8px; padding:12px 16px; color:var(--text); font:14px monospace; }
+.monitor-link { display:inline-block; margin-top:16px; border:1px solid var(--accent); border-radius:8px; background:#12304a; color:var(--accent); padding:9px 16px; cursor:pointer; font:inherit; }
+.reset-sec { margin:20px 0 0; padding:20px; border:1px solid var(--border); border-radius:12px; background:#0b1120; }
+.credit-list { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
+.guide-details { margin-top:20px; border:1px solid var(--border); border-radius:12px; padding:16px 20px; }
+.guide-details summary { cursor:pointer; color:var(--accent); font-weight:600; } .guide-sec { margin-top:12px; padding-top:16px; }
+@media(max-width:1050px) { .overview-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .overview-grid .status-card:last-child { grid-column:1/-1; } }
+@media(max-width:680px) { body { padding:14px; } .container { padding:20px 16px; } h1 { font-size:21px; } .overview-grid { grid-template-columns:1fr; } .overview-grid .status-card:last-child { grid-column:auto; } .credit-list { grid-template-columns:1fr; } .stat-label,.stat-val { font-size:13px; } }
 </style>
 </head>
 <body>
@@ -247,7 +261,7 @@ button.btn-query:hover { background: var(--accent-hover); }
   <p class="desc">输入你的专属客户端 API Key，查询席位额度状态及核销重置卡</p>
   
   <div class="form-group">
-    <input type="text" id="apiKeyInput" placeholder="输入 sk-team..." value="" autocomplete="off" spellcheck="false">
+    <input type="password" id="apiKeyInput" placeholder="输入 sk-team..." value="" autocomplete="off" spellcheck="false">
     <button class="btn-query" onclick="doQuery()">查询</button>
   </div>
 
@@ -261,6 +275,7 @@ button.btn-query:hover { background: var(--accent-hover); }
 // out of gateway access logs. Share links should use #key=... (the fragment is not
 // sent to the server); ?key=... still works but is removed from the address bar.
 let currentKey = "";
+let queryGeneration = 0;
 
 function getUrlKey() {
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
@@ -281,6 +296,8 @@ function esc(value) {
 async function api(path) {
   const res = await fetch(path, {
     cache: "no-store",
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
     headers: { "X-Carpool-Key": currentKey }
   });
   let data = {};
@@ -374,7 +391,10 @@ window.onload = function() {
 };
 
 async function doQuery() {
+  const turn = ++queryGeneration;
   currentKey = document.getElementById("apiKeyInput").value.trim();
+  const key = currentKey;
+  if (countdownTimer) clearInterval(countdownTimer);
   const area = document.getElementById("resultArea");
   if (!currentKey) {
     area.innerHTML = '<div class="alert alert-err">请输入有效的 API Key</div>';
@@ -384,6 +404,7 @@ async function doQuery() {
 
   try {
     const { res, data: d } = await api("api/status");
+    if (turn !== queryGeneration || key !== currentKey) return;
     if (!res.ok || d.error) {
       area.innerHTML = '<div class="alert alert-err">查询失败：' + esc(d.error || "未找到此 Key") + '</div>';
       return;
@@ -400,7 +421,7 @@ async function doQuery() {
       statusBadge = '<span class="badge badge-red">额度触顶 (冷却中)</span>';
     }
 
-    let html = '<div class="status-card">';
+    let html = '<div class="overview-grid"><div class="status-card"><div class="panel-title">席位状态</div>';
     html += '<div class="stat-row"><span class="stat-label">绑定席位</span><span class="stat-val">' + esc(d.seat_name) + '</span></div>';
     html += '<div class="stat-row"><span class="stat-label">网关状态</span><span class="stat-val">' + statusBadge + '</span></div>';
     if (d.expires_at) {
@@ -409,18 +430,20 @@ async function doQuery() {
     const lim = d.limits || {};
     html += '<div class="stat-row"><span class="stat-label">并发请求</span><span class="stat-val">' + esc(formatLimit(lim.active, lim.max_concurrency)) + '</span></div>';
     html += '<div class="stat-row"><span class="stat-label">近 1 分钟请求</span><span class="stat-val">' + esc(formatLimit(lim.recent_requests, lim.rpm)) + '</span></div>';
+    html += '</div><div class="status-card"><div class="panel-title">上游额度</div>';
     if (quotaSupported) {
-      html += '<div class="stat-row"><span class="stat-label">5小时滚动已用</span><span class="stat-val">' + esc(pri.used_percent !== undefined ? pri.used_percent + "%" : "0%") + '</span></div>';
+      html += '<div class="stat-row"><span class="stat-label">5小时滚动已用</span><span class="stat-val">' + esc(pri.used_percent !== undefined ? pri.used_percent + "%" : "暂不可用") + '</span></div>';
       if (pri.reset_at) {
         html += '<div class="stat-row"><span class="stat-label">⏱️ 5小时额度刷新倒计时</span><span class="stat-val" id="priCountdown" style="color: var(--accent);">' + formatRemaining5h(pri.reset_at) + '</span></div>';
       }
-      html += '<div class="stat-row"><span class="stat-label">周限额已用</span><span class="stat-val">' + esc(sec.used_percent !== undefined ? sec.used_percent + "%" : "0%") + '</span></div>';
+      html += '<div class="stat-row"><span class="stat-label">周限额已用</span><span class="stat-val">' + esc(sec.used_percent !== undefined ? sec.used_percent + "%" : "暂不可用") + '</span></div>';
       if (sec.reset_at) {
         html += '<div class="stat-row"><span class="stat-label">📅 周限额度刷新时间</span><span class="stat-val" id="secSchedule" style="color: var(--accent);">' + formatScheduleWeek(sec.reset_at) + '</span></div>';
       }
     } else {
       html += '<div class="stat-row"><span class="stat-label">额度窗口</span><span class="stat-val" style="color: var(--muted);">该席位类型暂不支持额度查询</span></div>';
     }
+    html += '</div><div class="status-card"><div class="panel-title">历史用量</div>';
     const totalTok = d.total_tokens || 0;
     const inputTok = d.input_tokens || 0;
     const outputTok = d.output_tokens || 0;
@@ -436,10 +459,11 @@ async function doQuery() {
     html += '<div class="token-col"><div class="token-lbl">缓存读取 (Hit)</div><div class="token-val" style="color:var(--green);">' + tokens(cachedTok) + '</div></div>';
     html += '</div>';
 
+    html += '<button class="monitor-link" onclick="openMonitor()">查看请求监控 ↗</button>';
     if (quotaSupported) {
       html += '<div class="stat-row"><span class="stat-label">可用撞墙重置卡</span><span class="stat-val" style="color: var(--orange);">' + esc(credCount) + ' 张</span></div>';
     }
-    html += '</div>';
+    html += '</div></div>';
 
     if (quotaSupported) {
       html += '<div class="reset-sec">';
@@ -482,7 +506,7 @@ async function doQuery() {
       html += '</div>';
     }
 
-    html += '<div class="guide-sec" id="guideSec"></div>';
+    html += '<details class="guide-details"><summary>客户端接入配置 <span style="color:var(--muted);font-size:12px;font-weight:400;"> · 展开查看与复制</span></summary><div class="guide-sec" id="guideSec"></div></details>';
 
     area.innerHTML = html;
     if (pri.reset_at || sec.reset_at) {
@@ -490,9 +514,12 @@ async function doQuery() {
     }
     setupGuide(d);
   } catch(e) {
+    if (turn !== queryGeneration) return;
     area.innerHTML = '<div class="alert alert-err">网络错误：' + esc(e.message) + '</div>';
   }
 }
+
+function openMonitor() { if (currentKey) window.location.assign("monitor#key=" + encodeURIComponent(currentKey)); }
 
 // Usage is only counted while some seat has a limit, so unlimited shows no count.
 function formatLimit(used, limit) {
@@ -543,10 +570,14 @@ async function loadModels() {
 }
 
 async function setupGuide(status) {
+  const turn = queryGeneration;
+  guide.models = [];
+  guide.model = "";
   guide.base = (status.public_base_url || (window.location.origin + gatewayRoot)).replace(/\/+$/, "");
   guide.provider = status.provider || "";
   renderGuide();
   const models = await loadModels();
+  if (turn !== queryGeneration) return;
   const matched = models.filter((m) => modelMatches(m, guide.provider));
   const rest = models.filter((m) => !modelMatches(m, guide.provider));
   guide.models = matched.concat(rest).map((m) => m.id);
@@ -665,6 +696,16 @@ document.addEventListener("click", (ev) => {
   const btn = ev.target.closest && ev.target.closest(".copy-btn[data-copy]");
   if (btn) {
     copyText(guide.blocks[Number(btn.dataset.copy)] || "", btn);
+  }
+});
+
+document.addEventListener("input", (ev) => {
+  if (ev.target && ev.target.id === "apiKeyInput") {
+    queryGeneration++;
+    currentKey = "";
+    guide.blocks = [];
+    document.getElementById("resultArea").innerHTML = "";
+    if (countdownTimer) clearInterval(countdownTimer);
   }
 });
 

@@ -66,6 +66,8 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 					Menu:        "拼车管家",
 					Description: "买家自助页面：额度与刷新倒计时、重置卡核销、客户端接入配置",
 				},
+				{Path: RouteMonitor, Menu: "拼车管家 · 请求监控", Description: "仅查看当前 Key 的请求状态、Token 与耗时"},
+				{Path: RouteAPIMonitor, Description: "当前 Key 的请求监控接口"},
 				{
 					Path:        RouteAdmin,
 					Menu:        "拼车管家 · 管理",
@@ -110,7 +112,10 @@ func configure(raw []byte) {
 	if prev := activeTable.Load(); prev != nil && prev.limited && !table.limited {
 		limiter.reset()
 	}
-	activeTable.Store(table)
+	prev := activeTable.Swap(table)
+	if prev != nil && prev.monitor != nil {
+		prev.monitor.close()
+	}
 }
 
 // loadConfig decodes the lifecycle request of plugin.register / plugin.reconfigure
@@ -152,6 +157,7 @@ func parseConfig(configYAML []byte) (PluginConfig, *routingTable, error) {
 	digest := sha256.Sum256(canonical)
 	table.configRevision = hex.EncodeToString(digest[:])
 	table.config = cfg
+	table.monitor = newMonitorService(cfg.DBPath)
 	return cfg, table, nil
 }
 

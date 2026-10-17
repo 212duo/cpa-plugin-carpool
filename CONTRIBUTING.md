@@ -12,7 +12,7 @@
 go test ./...
 go vet ./...
 gofmt -l .          # 应当没有输出
-node --test scripts/admin.test.cjs scripts/portal.test.cjs  # Node.js 24，页面行为
+node --test scripts/admin.test.cjs scripts/portal.test.cjs scripts/monitor.test.cjs  # Node.js 24，页面行为
 sh build.sh test    # 在 Docker 里测试并编译 out/cpa-carpool.so
 ```
 
@@ -28,6 +28,8 @@ sh build.sh test    # 在 Docker 里测试并编译 out/cpa-carpool.so
 | `admin.go` | 管理接口（概览、账号列表、配置校验）与管理页面 |
 | `host.go` | CPA 宿主回调封装 |
 | `upstream.go` | ChatGPT 额度与重置卡接口 |
+| `monitor_cache.go` / `monitor_store.go` | 按 Key 与配置隔离的有界缓存、并发合并与只读连接池 |
+| `monitor.go` / `monitor.html` | 当前 Key 的请求监控、字段白名单与宽屏看板 |
 | `stats.go` | 读取 CPA Manager Plus 用量数据库 |
 | `portal.html` / `admin.html` | 买家 Portal 与车主管理页面（编译时嵌入，不依赖外部资源） |
 | `plugin-store/registry-entry.json` | 提交到 CLIProxyAPI 插件商店的 registry 条目 |
@@ -47,8 +49,18 @@ sh build.sh test    # 在 Docker 里测试并编译 out/cpa-carpool.so
 - 新功能和 bug 修复都需要配套测试。测试里用 `installFakeHost` 模拟 CPA 宿主回调，用 `installFakeUpstream` 模拟 ChatGPT 接口，不要访问真实服务。
 - 修改配置项时同步更新 `config.example.yaml`，`TestConfigExampleIsValid` 会校验它。
 - 中英文 README（`README.md`、`README.en.md`）内容要保持一致，改了一份请同步另一份。
-- `docs/images/portal.png`、`portal-guide.png`、`admin.png` 是用演示数据渲染的截图，界面有明显变化时请重新截图；截图里不能出现真实的 key、邮箱或账号信息。
+- `docs/images/portal.png`、`portal-guide.png`、`admin.png`、`monitor.png` 是用演示数据渲染的截图，界面有明显变化时请重新截图；截图里不能出现真实的 key、邮箱或账号信息。
 - 修改 `plugin-store/registry-entry.json` 或 Release 打包方式时，`store_test.go` 会按 CLIProxyAPI 插件商店的规则检查它们。
+
+### 大数据量监控压测
+
+默认测试跳过百万条压测。Linux 使用以下命令；数据库与报告可通过 `CARPOOL_MONITOR_STRESS_DB` / `CARPOOL_MONITOR_STRESS_REPORT` 指定，仅允许使用带合成数据标记的测试库，勿指向真实数据。
+
+```bash
+CARPOOL_MONITOR_STRESS=1 CARPOOL_MONITOR_STRESS_SUSTAINED=1 go test -run '^TestMonitorLargeDataLoad$' -count=1 -timeout 15m -v .
+```
+
+场景与测量边界见 [docs/monitor-performance.md](docs/monitor-performance.md)。`monitor_baseline_test.go` 保留优化前的三查询实现作为对照，不编译进插件。
 
 ## 提交 PR
 

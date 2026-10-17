@@ -23,7 +23,7 @@ jobs:
           node-version: '24'
 
       - name: Embedded page behavior
-        run: node --test scripts/admin.test.cjs scripts/portal.test.cjs
+        run: node --test scripts/admin.test.cjs scripts/portal.test.cjs scripts/monitor.test.cjs
 
       - name: gofmt
         run: |
@@ -42,6 +42,21 @@ jobs:
 
       - name: Test (without cgo)
         run: CGO_ENABLED=0 go test -count=1 ./...
+
+      - name: Monitoring load regression (100,000 rows)
+        env:
+          CARPOOL_MONITOR_STRESS: '1'
+          CARPOOL_MONITOR_STRESS_ROWS: '100000'
+          CARPOOL_MONITOR_STRESS_REPORT: out/monitor-load.json
+        run: |
+          mkdir -p out
+          go test -run '^TestMonitorLargeDataLoad$' -count=1 -timeout 5m -v .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: monitor-load-report
+          path: out/monitor-load.json
+          if-no-files-found: error
 
   build:
     needs: test

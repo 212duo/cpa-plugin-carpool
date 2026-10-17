@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>请求监控 · 拼车管家</title>
+<style>
+:root { color-scheme: dark; --bg:#0b1221; --card:#151e2e; --line:#2b364b; --text:#edf2fa; --muted:#94a3b8; --blue:#70baff; --green:#43d89c; --red:#ff787e; }
+*{box-sizing:border-box} body{margin:0;background:radial-gradient(ellipse at top right,#142544,transparent 65%),var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
+main{max-width:1600px;margin:auto;padding:28px 28px 44px} h1{font-size:25px;letter-spacing:.02em;margin:0 0 5px} h2{font-size:16px;margin:0} p{margin:0;color:var(--muted)} .head,.toolbar,.section-title,.filters,.login{display:flex;align-items:center;gap:12px}.head,.section-title{justify-content:space-between}.head{margin-bottom:24px}.eyebrow{color:var(--blue);font-size:11px;letter-spacing:.16em;margin-bottom:8px}
+button,select,input{font:inherit;border:1px solid var(--line);border-radius:9px;color:var(--text);background:#111a29;padding:9px 13px}button{cursor:pointer}button:hover{border-color:var(--blue)}button.primary{background:#8bc8ff;color:#092039;border-color:transparent;font-weight:600}button:disabled{opacity:.5;cursor:wait}input{min-width:0;flex:1}input:focus{outline:1px solid var(--blue)}.login{padding:16px;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:20px}.login label{color:var(--muted);white-space:nowrap}.note{font-size:12px;color:var(--muted)}
+.metrics{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:12px;margin-bottom:20px}.metric{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:17px 16px;min-width:0}.metric .label{font-size:12px;color:var(--muted)}.metric .value{font-size:27px;font-weight:700;letter-spacing:-.04em;margin:10px 0 5px;font-variant-numeric:tabular-nums}.metric .sub{font-size:11px;color:var(--muted)}.good{color:var(--green)}.bad{color:var(--red)}.blue{color:var(--blue)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:18px}.section-title{padding:16px 18px;border-bottom:1px solid var(--line)}.toolbar{flex-wrap:wrap;margin:10px 0}.filters{flex-wrap:wrap}.toolbar .note{margin-left:auto}.scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th{font-size:11px;font-weight:500;color:var(--muted);padding:12px 18px;background:#111927}td{padding:14px 18px;border-top:1px solid #263145;font-variant-numeric:tabular-nums}td.model{font-family:ui-monospace,Consolas,monospace;white-space:normal;overflow-wrap:anywhere;min-width:170px;max-width:300px}td small{display:block;color:var(--muted);font-size:11px;margin-top:4px}.status{display:inline-flex;align-items:center;gap:6px}.dot{height:7px;width:7px;border-radius:50%;background:currentColor}.empty{text-align:center;color:var(--muted);padding:42px 20px}.message{margin:12px 0;color:var(--muted);min-height:21px}.message.error{color:var(--red)}footer{margin-top:20px;color:var(--muted);font-size:12px} .pill{color:var(--blue);background:#203451;border:1px solid #324a69;border-radius:99px;padding:3px 9px;font-size:11px}
+@media(max-width:1250px){.metrics{grid-template-columns:repeat(4,minmax(0,1fr))}.metric .value{font-size:25px}}
+@media(max-width:640px){main{padding:20px 14px}.head{align-items:flex-start}.head p{max-width:230px;font-size:12px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.metric{padding:12px}.metric .value{font-size:25px;margin:5px 0}.login{flex-wrap:wrap;padding:12px}.login label{width:100%;font-size:12px}.login input{width:100px}.toolbar{align-items:flex-start}.toolbar .note{margin-left:0;width:100%}.filters{gap:8px}select,button{padding:9px 10px}td,th{padding:12px}.section-title{padding:14px}.section-title .note{max-width:150px;text-align:right}h1{font-size:22px}}
+</style>
+</head>
+<body>
+<main>
+  <header class="head"><div><div class="eyebrow">CARPOOL / OBSERVABILITY</div><h1>请求监控 <span class="pill">仅当前 Key</span></h1><p>查看自己的调用表现、Token 用量与近期请求。</p></div><button id="portalBtn">席位概览 ↗</button></header>
+  <div class="login"><label for="keyInput">客户端 API Key</label><input id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="输入你的专属 Key"><button class="primary" id="connectBtn">连接监控</button><button id="disconnectBtn" hidden>退出</button></div>
+  <div class="toolbar"><div class="filters"><select id="range" aria-label="时间范围"><option value="1h">最近 1 小时</option><option value="24h" selected>最近 24 小时</option><option value="7d">最近 7 天</option></select><select id="status" aria-label="请求状态"><option value="all">全部请求</option><option value="success">仅成功</option><option value="failed">仅失败</option></select><select id="limit" aria-label="记录数量"><option value="100">最近 100 条</option><option value="500">最近 500 条</option></select><button id="pauseBtn">暂停刷新</button><button id="refreshBtn">立即刷新</button></div><span class="note" id="updated">每 10 秒刷新 · 等待连接</span></div>
+  <div id="message" class="message" role="status">输入 Key 后加载。Key 仅保存在当前页面内存中。</div>
+  <div id="metrics" class="metrics"></div>
+  <section class="panel"><div class="section-title"><h2>近期请求</h2><span class="note" id="recordCount">等待加载</span></div><div class="scroll"><table><thead><tr><th>请求模型</th><th>状态</th><th>推理 / 服务</th><th>首字耗时</th><th>总耗时</th><th>输出 TPS</th><th>Token</th><th>输入 / 输出 / 缓存</th><th>时间</th></tr></thead><tbody id="events"></tbody></table></div></section>
+  <section class="panel"><div class="section-title"><h2>模型概览</h2><span class="note">所选范围与状态 · 最多 50 个模型</span></div><div class="scroll"><table><thead><tr><th>请求模型</th><th>调用</th><th>成功率</th><th>失败</th><th>Token</th><th>输入 / 输出</th><th>缓存读取</th><th>平均耗时</th></tr></thead><tbody id="models"></tbody></table></div></section>
+  <footer>近期记录最多缓存 10 秒，汇总最多缓存 30 秒。仅展示用量采集器已写入的记录，可能存在采集延迟；没有记录不代表没有发起请求。缓存读取包含在输入统计中，请勿重复相加。账号、凭据、请求内容与上游错误详情不会在此展示。</footer>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = value => String(value ?? "").replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const number = n => { n=Number(n)||0; return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(n); };
+const duration = n => n==null?'--':Number(n)>=1000?(Number(n)/1000).toFixed(2)+' s':Math.round(Number(n))+' ms';
+const percent = s => s.calls?(100*s.successes/s.calls).toFixed(1)+'%':'--';
+let currentKey='', generation=0, controller=null, timer=null, paused=false, retryDelay=10000;
+
+function clearData() {
+  $('metrics').innerHTML=['调用','成功率','失败','Token','输入','输出','缓存读取','平均耗时'].map(label=>'<div class="metric"><div class="label">'+label+'</div><div class="value">--</div><div class="sub">当前 Key</div></div>').join('');
+  $('models').innerHTML='<tr><td class="empty" colspan="8">暂无数据</td></tr>';
+  $('events').innerHTML='<tr><td class="empty" colspan="9">暂无数据</td></tr>';
+  $('recordCount').textContent='等待加载';
+}
+function message(text,error=false){$('message').textContent=text;$('message').className='message'+(error?' error':'');}
+function stopRequest(){generation++;if(controller)controller.abort();controller=null;if(timer)clearTimeout(timer);timer=null;}
+function schedule(){if(currentKey&&!paused&&!document.hidden)timer=setTimeout(refresh,retryDelay);}
+function render(d){
+  const s=d.summary;
+  const cards=[['调用',number(s.calls),'所选范围内请求','blue'],['成功率',percent(s),number(s.successes)+' 次成功','good'],['失败',number(s.failures),'所选范围内失败','bad'],['Token',number(s.total_tokens),'采集器报告的总量',''],['输入',number(s.input_tokens),'含缓存输入',''],['输出',number(s.output_tokens),'输出 Token','blue'],['缓存读取',number(s.cached_tokens),'不含缓存创建','good'],['平均耗时',duration(s.avg_latency_ms),'有耗时记录的请求','']];
+  $('metrics').innerHTML=cards.map(([label,value,sub,color])=>'<div class="metric"><div class="label">'+label+'</div><div class="value '+color+'">'+esc(value)+'</div><div class="sub">'+esc(sub)+'</div></div>').join('');
+  $('models').innerHTML=d.models.map(m=>'<tr><td class="model">'+esc(m.model)+'</td><td>'+number(m.calls)+'</td><td class="good">'+percent(m)+'</td><td class="bad">'+number(m.failures)+'</td><td>'+number(m.total_tokens)+'</td><td>'+number(m.input_tokens)+' / '+number(m.output_tokens)+'</td><td>'+number(m.cached_tokens)+'</td><td>'+duration(m.avg_latency_ms)+'</td></tr>').join('')||'<tr><td class="empty" colspan="8">此范围内尚无已采集的请求</td></tr>';
+  $('events').innerHTML=d.events.map(e=>{
+    const tps=e.latency_ms!=null&&e.ttft_ms!=null&&e.latency_ms>e.ttft_ms&&e.output_tokens>0&&!e.failed?(e.output_tokens*1000/(e.latency_ms-e.ttft_ms)).toFixed(1):'--';
+    return '<tr><td class="model">'+esc(e.model)+'</td><td><span class="status '+(e.failed?'bad':'good')+'"><span class="dot"></span>'+(e.failed?'失败':'成功')+'</span>'+(e.status_code?'<small>HTTP '+esc(e.status_code)+'</small>':'')+'</td><td>'+esc(e.reasoning||'--')+'<small>'+esc(e.service_tier||'--')+'</small></td><td>'+duration(e.ttft_ms)+'</td><td>'+duration(e.latency_ms)+'</td><td>'+tps+'</td><td>'+number(e.total_tokens)+'</td><td>'+number(e.input_tokens)+' / '+number(e.output_tokens)+' / '+number(e.cached_tokens)+'</td><td>'+esc(new Date(e.timestamp_ms).toLocaleString())+'</td></tr>';
+  }).join('')||'<tr><td class="empty" colspan="9">此范围内尚无已采集的请求</td></tr>';
+  $('recordCount').textContent='显示 '+d.events.length+' 条'+(d.truncated?' · 已截取最近记录':'');
+  $('updated').textContent=(paused?'已暂停 · ':'每 10 秒刷新 · ')+new Date(d.generated_at_ms).toLocaleTimeString()+' · 汇总 '+new Date(d.summary_at_ms??d.generated_at_ms).toLocaleTimeString();
+}
+async function refresh(){
+  if(!currentKey||document.hidden)return;
+  stopRequest();const turn=generation, key=currentKey;
+  const abort=new AbortController();controller=abort;const timeout=setTimeout(()=>abort.abort(),10000);
+  try{
+    const q=new URLSearchParams({range:$('range').value,status:$('status').value,limit:$('limit').value});
+    const res=await fetch('api/monitor?'+q,{headers:{'X-Carpool-Key':key},cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer',signal:abort.signal});
+    const d=await res.json();if(turn!==generation||key!==currentKey)return;
+    if(!res.ok){retryDelay=Math.min(60000,retryDelay*2);clearData();message(res.status===503?'请求记录暂不可用，请联系车主检查用量采集与数据库配置。':'无法读取，请检查 Key、席位有效期与筛选条件。',true);if([400,403,404].includes(res.status)){paused=true;$('pauseBtn').textContent='继续刷新';}return;}
+    retryDelay=10000;render(d);message('仅显示当前 Key 的记录；汇总与请求列表使用相同的范围及状态筛选。');
+  }catch(e){if(turn===generation){retryDelay=Math.min(60000,retryDelay*2);clearData();message('查询失败，已清空旧数据。请检查网络或稍后重试。',true);}}
+  finally{clearTimeout(timeout);if(turn===generation){controller=null;schedule();}}
+}
+function connect(){stopRequest();currentKey=$('keyInput').value.trim();clearData();paused=false;retryDelay=10000;$('pauseBtn').textContent='暂停刷新';$('disconnectBtn').hidden=!currentKey;if(currentKey){message('正在加载…');refresh();}else message('请输入有效的 API Key。',true);}
+function disconnect(){stopRequest();currentKey='';$('keyInput').value='';$('disconnectBtn').hidden=true;clearData();$('updated').textContent='已退出';message('已清空 Key 与请求数据。');}
+$('connectBtn').onclick=connect;$('disconnectBtn').onclick=disconnect;
+$('keyInput').addEventListener('keydown',e=>{if(e.key==='Enter')connect();});
+$('keyInput').addEventListener('input',()=>{if(currentKey) {stopRequest();currentKey='';clearData();$('updated').textContent='Key 已修改 · 等待连接';message('点击连接监控以加载此 Key。');}});
+for(const id of ['range','status','limit'])$(id).onchange=()=>{stopRequest();clearData();refresh();};
+$('refreshBtn').onclick=refresh;
+$('pauseBtn').onclick=()=>{paused=!paused;$('pauseBtn').textContent=paused?'继续刷新':'暂停刷新';if(paused){stopRequest();$('updated').textContent='已暂停刷新';}else refresh();};
+$('portalBtn').onclick=()=>location.assign('portal'+(currentKey?'#key='+encodeURIComponent(currentKey):''));
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopRequest();else if(!paused)refresh();});
+window.addEventListener('pagehide',disconnect);
+clearData();
+{
+const initialKey=new URLSearchParams(location.hash.replace(/^#/,'')).get('key')||'';
+// Strip even unknown fragments/query strings before making any network request.
+if(location.hash||location.search)history.replaceState(null,'',location.pathname);
+if(initialKey){$('keyInput').value=initialKey;connect();}
+}
+</script>
+</body>
+</html>

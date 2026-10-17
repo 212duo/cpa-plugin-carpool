@@ -12,7 +12,7 @@
 
 [简体中文](./README.md) · **English**
 
-This README includes unreleased 0.4.0 features (the owner admin page and plugin store assets). For older downloads, follow the notes for that Release.
+The current release is [v0.5.0](https://github.com/212duo/cpa-plugin-carpool/releases/tag/v0.5.0), including owner administration, request monitoring and wider layouts.
 
 [Quick start](#-quick-start) · [Configuration](#-configuration-reference) · [Security](#-security-design) · [Known limitations](#-known-limitations) · [Spec (SPEC.md, Chinese)](./SPEC.md) · [Changelog](./CHANGELOG.md)
 
@@ -196,6 +196,33 @@ An auth ID is the account's credential file path **relative to CPA's auth direct
 * **Several people sharing one account**: give several seats the same `primary`, each with its own keys and expiry;
 * **One seat over several accounts**: list several `primary` IDs; scheduling picks among them by CPA priority, while the portal shows and resets the first one that is loaded.
 
+### Request monitoring (0.5)
+
+Click the monitoring button in the Portal, or open `https://your-domain/v0/resource/plugins/cpa-carpool/monitor` with your client key. Filter the last 1 hour / 24 hours / 7 days and successful / failed requests, inspect model summaries and the latest 100 / 500 records. The page refreshes every 10 seconds, pauses in background tabs, and supports horizontal table scrolling on phones.
+
+![Request monitoring with demo data](docs/images/monitor.png)
+
+* **Current key only:** the server verifies `X-Carpool-Key` and scopes every summary and record query to that key. Other keys in the same seat or sharing the same upstream account are excluded. Give each person a separate key; do not share or reassign old keys.
+* **Minimal fields:** requested model, reasoning / service enums, success / failure, HTTP error code, tokens, first-token / total latency and timestamp. Account emails, auth files, keys / hashes, raw errors, request / response content, IPs and trace IDs are excluded. Missing requested models display an unavailable label; internal resolved models are never substituted.
+* **Data source:** the same Manager Plus usage database described below. Only collected records appear, potentially with delay; in-flight and uncollected requests are unavailable. Costs are omitted until reliable pricing is available. Output TPS is estimated as output tokens / (total latency − first-token latency); missing or invalid values show `--`.
+* **Access:** the monitoring API accepts only the `X-Carpool-Key` header. Page share links may use `#key=...`, never `?key=`. The page removes credentials from its address, keeps the key in memory, avoids browser storage, and clears data on key changes or logout. Use HTTPS for public access and protect share links.
+
+#### Resource use and database index
+
+Recent records are cached for 10 seconds; summaries and model groups for 30 seconds, with separate timestamps. Aggregates may be shared between list limits only for the same verified key, range and status. Keys never share cached results. Current authorization and expiry are checked before and after reading data; reconfiguration drops caches and cancels old queries. Errors are not cached and expired data is never used as a fallback.
+
+Concurrent identical requests are coalesced, database connections are reused, and at most two monitoring data queries run across the plugin. Waiting and execution share a three-second deadline. The two caches hold at most 20 MiB of JSON data (excluding Go / SQLite and in-flight memory), with 256 response entries and 512 summary entries. Failed polling backs off to 20 / 40 / 60 seconds and returns to 10 seconds after recovery.
+
+**For larger databases, run the index script once from the Manager Plus database's writable side.** The plugin remains read-only and never adds indexes automatically:
+
+```bash
+sqlite3 /actual/path/usage.sqlite < scripts/usage-monitor-index.sql
+```
+
+The index covers `(api_key_hash, timestamp_ms DESC, id DESC)` and the script is idempotent. Building it needs time and extra disk space; use a quiet period. A directory mounted read-only inside CPA cannot create it. Queries still work without the index, but initial aggregation can be slower on large datasets.
+
+See [monitoring performance tests](docs/monitor-performance.md) for the reproducible million-row workload, scenarios and results.
+
 ### Token history
 
 History comes from events already collected into CPA Manager Plus's `usage.sqlite`, separately from ChatGPT's quota windows. Installing this plugin alone does not create historical usage records.
@@ -332,7 +359,8 @@ Please read [CONTRIBUTING.md](./CONTRIBUTING.md) (Chinese) before contributing. 
 - [x] **v0.1.0**: standalone prototype (Python + Caddy) validating the countdowns, one-click reset and field masking
 - [x] **v0.2.0**: native CPA v8 plugin; exact binding, lease expiry, fail-closed config; cooldown cleared through host callbacks
 - [x] **v0.3.0**: per-seat concurrency / RPM limits (shared by the seat's keys); client setup guides in the portal (Codex CLI, Claude Code, Cursor, OpenAI-compatible)
-- [x] **v0.4.0**: owner admin page (seat management, key generation, account binding, limits and usage); plugin store release assets and registry entry
+- [x] **v0.5.0**: private per-key request monitoring and wider Portal / admin layouts
+- [x] **v0.4 development milestone (included in v0.5.0)**: owner admin page (seat management, key generation, account binding, limits and usage); plugin store release assets and registry entry
 
 ## 📜 Disclaimer
 

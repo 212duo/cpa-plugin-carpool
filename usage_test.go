@@ -22,7 +22,7 @@ func TestUsageAPIReportsAvailabilityAndKeepsKeyScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	mustConfigure(t, "enabled: true\ndb-path: "+path+` 
+	mustConfigure(t, "enabled: true\ndb-path: "+path+`
 users:
   - name: shared
     api-keys: [sk-first, sk-second, sk-unused]
