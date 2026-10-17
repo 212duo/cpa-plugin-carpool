@@ -3,10 +3,16 @@
 # 只列出与本插件相关的部分，合并进你自己的 config.yaml 即可。
 # 改完后 CPA 重载配置时会把新配置推给插件，一般不需要重启。
 
+# 可选：使用 0.4.0 管理页面时，先在 CPA 配好管理密钥。
+# 旧配置 remote-management 仍兼容；v8 标准字段是 management。
+# management:
+#   secret-key: "换成足够长的管理密钥"
+#   allow-remote: false           # 仅从其他设备访问管理页时改为 true
+
 # 1. 客户端认证：买家的 key 也必须写在这里，否则请求在调度之前就会被 CPA 拒绝。
 access:
   api-keys:
-    - "sk-owner-change-me"        # 你自己的 key：不写进 carpool，走 CPA 默认调度
+    - "sk-owner-change-me"        # 保留独立的车主 key，不写进 carpool，走 CPA 默认调度
     - "sk-buyer-alice-change-me"
     - "sk-buyer-bob-change-me"
     - "sk-buyer-bob-2-change-me"
@@ -25,7 +31,9 @@ plugins:
 
       # 可选：CPA Manager Plus 的用量数据库，用来给买家展示历史 Token 用量。
       # 留空时依次尝试 /opt/cpa/manager-data/usage.sqlite、manager-data/usage.sqlite、
-      # ../manager-data/usage.sqlite；都不存在则显示为 0。
+      # ../manager-data/usage.sqlite；不存在或不可读时显示“统计暂不可用”。
+      # Docker 分开部署时，把 Manager 的完整数据目录（含 -wal/-shm）挂载到 CPA，
+      # 此处填写 CPA 容器内的路径；单独安装插件不会生成历史统计。
       db-path: ""
 
       # 可选：请求 ChatGPT 额度接口时使用的 User-Agent，留空使用内置默认值。

@@ -62,23 +62,40 @@ func logf(level, format string, args ...any) {
 	}
 }
 
-// findSeatAuth returns the runtime entry of the seat's first configured Auth ID
-// that CPA currently knows about.
-func findSeatAuth(s *seat) (pluginapi.HostAuthFileEntry, error) {
+// listAuths returns the auths CPA exposes to plugins through host.auth.list.
+func listAuths() ([]pluginapi.HostAuthFileEntry, error) {
 	var list struct {
 		Files []pluginapi.HostAuthFileEntry `json:"files"`
 	}
 	if err := callHost(pluginabi.MethodHostAuthList, map[string]any{}, &list); err != nil {
+		return nil, err
+	}
+	return list.Files, nil
+}
+
+// findSeatAuth returns the runtime entry of the seat's first configured Auth ID
+// that CPA currently knows about.
+func findSeatAuth(s *seat) (pluginapi.HostAuthFileEntry, error) {
+	files, err := listAuths()
+	if err != nil {
 		return pluginapi.HostAuthFileEntry{}, err
 	}
+	if entry, ok := matchSeatAuth(s, files); ok {
+		return entry, nil
+	}
+	return pluginapi.HostAuthFileEntry{}, fmt.Errorf("none of the auth IDs of seat %s is loaded in CPA", s.user.Name)
+}
+
+// matchSeatAuth picks the seat's first configured Auth ID present in files.
+func matchSeatAuth(s *seat, files []pluginapi.HostAuthFileEntry) (pluginapi.HostAuthFileEntry, bool) {
 	for _, want := range s.matchIDs {
-		for _, entry := range list.Files {
+		for _, entry := range files {
 			if normalizeAuthID(entry.ID) == want {
-				return entry, nil
+				return entry, true
 			}
 		}
 	}
-	return pluginapi.HostAuthFileEntry{}, fmt.Errorf("none of the auth IDs of seat %s is loaded in CPA", s.user.Name)
+	return pluginapi.HostAuthFileEntry{}, false
 }
 
 // loadCredentials reads the credential JSON of one auth through host.auth.get.

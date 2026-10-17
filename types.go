@@ -6,13 +6,16 @@ import (
 )
 
 // PluginVersion is the semantic release version of the carpool plugin.
-const PluginVersion = "0.3.0"
+const PluginVersion = "0.4.0"
 
 // PluginSchemaVersion is the RPC contract version declared at plugin.register.
 // Version 2 adds request.complete, which the concurrency limit needs; version 6
 // keeps management JSON responses unescaped. Pinned rather than taken from the SDK
 // so an SDK upgrade cannot silently opt into a newer contract.
 const PluginSchemaVersion = 6
+
+// PluginLogoURL is the logo shown by CPA's management clients and the plugin store.
+const PluginLogoURL = "https://raw.githubusercontent.com/212duo/cpa-plugin-carpool/main/docs/images/logo.png"
 
 // DefaultUpstreamUserAgent is sent to the ChatGPT quota endpoints unless
 // upstream-user-agent overrides it.
@@ -23,6 +26,18 @@ const (
 	RoutePortal    = "/portal"
 	RouteAPIStatus = "/api/status"
 	RouteAPIReset  = "/api/reset"
+	RouteAdmin     = "/admin"
+)
+
+// Management API route paths under /v0/management/. CPA serves them only to
+// callers holding the management key. Unlike resources they are not scoped by
+// plugin ID, hence the fixed carpool prefix.
+const (
+	managementBasePath = "/v0/management"
+
+	RouteAdminOverview = "/carpool/overview"
+	RouteAdminAuths    = "/carpool/auths"
+	RouteAdminValidate = "/carpool/validate"
 )
 
 // Envelope is the standard JSON envelope exchanged with the CPA plugin ABI.
@@ -112,7 +127,9 @@ type ResetCreditItem struct {
 	RedeemedAt *string `json:"redeemed_at,omitempty"`
 }
 
-// SeatLimits reports a seat's request limits and its current use of them.
+// SeatLimits reports a seat's request limits and its current use of them. Use is
+// only counted while some seat has a limit, since only then are the request hooks
+// registered.
 type SeatLimits struct {
 	MaxConcurrency int `json:"max_concurrency"` // 0 = unlimited
 	RPM            int `json:"rpm"`             // 0 = unlimited
@@ -136,6 +153,7 @@ type BuyerStatusResponse struct {
 	UpstreamUsage    map[string]any    `json:"upstream_usage"`
 	CreditsAvailable int               `json:"credits_available"`
 	CreditsList      []ResetCreditItem `json:"credits_list"`
+	UsageAvailable   bool              `json:"usage_available"`
 	LocalCalls       int64             `json:"local_calls"`
 	InputTokens      int64             `json:"input_tokens"`
 	OutputTokens     int64             `json:"output_tokens"`
@@ -143,6 +161,59 @@ type BuyerStatusResponse struct {
 	TotalTokens      int64             `json:"total_tokens"`
 	IsCooling        bool              `json:"is_cooling"`
 	ExpiresAt        *time.Time        `json:"expires_at,omitempty"`
+}
+
+// AdminOverview is the runtime state shown on the admin page. The seats'
+// configuration itself, keys included, is read from CPA's config API.
+type AdminOverview struct {
+	PluginVersion  string `json:"plugin_version"`
+	ConfigRevision string `json:"config_revision"`
+	Enabled        bool   `json:"enabled"`
+	ConfigError    string `json:"config_error,omitempty"`
+	// LegacyHost is true when the host cannot report request completion, so
+	// max-concurrency is not enforced.
+	LegacyHost bool `json:"legacy_host,omitempty"`
+	// UsageDatabase reports whether the CPA Manager Plus usage database was found.
+	UsageDatabase  bool        `json:"usage_database"`
+	UsageAvailable bool        `json:"usage_available"`
+	Seats          []AdminSeat `json:"seats"`
+}
+
+// AdminSeat is the runtime state of one compiled seat.
+type AdminSeat struct {
+	Name      string     `json:"name"`
+	Keys      int        `json:"keys"`
+	Primary   []string   `json:"primary"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Expired   bool       `json:"expired"`
+	Limits    SeatLimits `json:"limits"`
+	// Auth is the seat account CPA currently has loaded, nil when none is.
+	Auth  *AdminSeatAuth `json:"auth,omitempty"`
+	Usage TokenStats     `json:"usage"`
+}
+
+// AdminSeatAuth describes the loaded account of a seat.
+type AdminSeatAuth struct {
+	ID          string `json:"id"`
+	Provider    string `json:"provider,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Disabled    bool   `json:"disabled,omitempty"`
+	Unavailable bool   `json:"unavailable,omitempty"`
+	Cooling     bool   `json:"cooling"`
+}
+
+// AdminAuth is one CPA account offered when binding a seat.
+type AdminAuth struct {
+	ID          string `json:"id"`
+	Provider    string `json:"provider,omitempty"`
+	Label       string `json:"label,omitempty"`
+	Email       string `json:"email,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Disabled    bool   `json:"disabled,omitempty"`
+	Unavailable bool   `json:"unavailable,omitempty"`
+	RuntimeOnly bool   `json:"runtime_only,omitempty"`
+	// Seats lists the seats already bound to this account.
+	Seats []string `json:"seats,omitempty"`
 }
 
 // ResetResponse is returned after a reset card redemption attempt.

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="title">
+  <title id="title">cpa-plugin-carpool logo</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <circle cx="92" cy="58" r="11" fill="#ffffff" fill-opacity="0.9"/>
+  <circle cx="128" cy="52" r="11" fill="#ffffff" fill-opacity="0.9"/>
+  <circle cx="164" cy="58" r="11" fill="#ffffff" fill-opacity="0.9"/>
+  <polygon points="80,130 102,88 154,88 178,130" fill="#ffffff"/>
+  <rect x="44" y="124" width="168" height="52" rx="18" fill="#ffffff"/>
+  <polygon points="95,124 109,98 125,98 125,124" fill="#1e3a8a"/>
+  <polygon points="133,124 133,98 149,98 164,124" fill="#1e3a8a"/>
+  <circle cx="90" cy="178" r="22" fill="#0f172a"/>
+  <circle cx="166" cy="178" r="22" fill="#0f172a"/>
+  <circle cx="90" cy="178" r="9" fill="#e2e8f0"/>
+  <circle cx="166" cy="178" r="9" fill="#e2e8f0"/>
+</svg>

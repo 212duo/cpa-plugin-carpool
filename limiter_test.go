@@ -300,20 +300,51 @@ func TestStatusReportsLimitsAndGuideFields(t *testing.T) {
 	}
 }
 
-func TestRegistrationDeclaresLimiterHooks(t *testing.T) {
-	raw, err := json.Marshal(pluginRegistration())
+func register(t *testing.T, yamlText string) registrationPayload {
+	t.Helper()
+	raw, _ := json.Marshal(lifecycleRequest{ConfigYAML: []byte(yamlText), SchemaVersion: PluginSchemaVersion})
+	out, err := handleMethod(pluginabi.MethodPluginReconfigure, raw)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var env Envelope
+	if err := json.Unmarshal(out, &env); err != nil || !env.OK {
+		t.Fatalf("bad envelope %s: %v", out, err)
+	}
 	var reg registrationPayload
-	if err := json.Unmarshal(raw, &reg); err != nil {
+	if err := json.Unmarshal(env.Result, &reg); err != nil {
 		t.Fatal(err)
 	}
+	return reg
+}
+
+func TestRequestHooksFollowLimits(t *testing.T) {
+	resetLimiter(t)
+
+	reg := register(t, limitsConfig)
 	if reg.SchemaVersion < 2 || reg.SchemaVersion > pluginabi.SchemaVersion {
 		t.Fatalf("schema version %d: request.complete needs >= 2, the SDK supports <= %d", reg.SchemaVersion, pluginabi.SchemaVersion)
 	}
 	caps := reg.Capabilities
 	if !caps.Scheduler || !caps.RequestInterceptor || !caps.RequestLifecyclePlugin || !caps.ManagementAPI {
-		t.Fatalf("capabilities %+v", caps)
+		t.Fatalf("limited config: capabilities %+v", caps)
+	}
+	intercept(t, "r1", bearer("sk-alice"))
+
+	// Without limits the hooks would only add a plugin call to every request.
+	caps = register(t, testConfig).Capabilities
+	if caps.RequestInterceptor || caps.RequestLifecyclePlugin || !caps.Scheduler || !caps.ManagementAPI {
+		t.Fatalf("unlimited config: capabilities %+v", caps)
+	}
+	// request.complete for r1 will never arrive now, so its slot must not linger.
+	if active, _ := limiter.usage("TeamA-1", time.Now()); active != 0 {
+		t.Fatal("counters survived unregistering the hooks")
+	}
+	if active, recent := limiter.usage("Limited", time.Now()); active != 0 || recent != 0 {
+		t.Fatalf("counters survived unregistering the hooks: %d active, %d recent", active, recent)
+	}
+
+	if caps := register(t, "enabled: true\nusers: [\n").Capabilities; caps.RequestInterceptor || !caps.Scheduler {
+		t.Fatalf("invalid config: capabilities %+v", caps)
 	}
 }

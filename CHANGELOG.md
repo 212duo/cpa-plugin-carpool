@@ -4,6 +4,50 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 车主管理页面 `GET /v0/resource/plugins/<插件ID>/admin`：凭 CPA 管理密钥登录，增删改席位、生成随机 key、从 CPA 已加载的账号中选择绑定、设置租期与限额，查看账号加载 / 冷却状态、限额使用与历史用量，复制买家 Portal 链接。
+- 管理页面保存时先由插件按严格规则校验，再通过 CPA 的 `/v8/management/config` 接口依次撤销被删除的 key、写入 `plugins.configs.<插件ID>`、加入新 key，写回 `config.yaml` 后由 CPA 自动重载。
+- 管理接口（挂在 CPA Management API 下，需要管理密钥）：`GET /v0/management/carpool/overview`、`GET /v0/management/carpool/auths`、`POST /v0/management/carpool/validate`。
+- 插件元数据新增 logo 与 `ConfigFields`，CPA 管理面板可以展示各配置项的说明。
+- 插件商店发布物：Release 额外提供 `cpa-carpool_<版本>_linux_<架构>.zip`（`cpa-carpool.so` 位于 zip 根目录）和 `checksums.txt`，符合 CLIProxyAPI 插件商店的安装要求；`plugin-store/registry-entry.json` 是提交到商店的 registry 条目。
+- 测试覆盖 registry 条目与 Release 产物命名，防止与商店规则不一致。
+
+### 变更
+
+- Release 的校验文件由 `SHA256SUMS` 改名为 `checksums.txt`，同时覆盖 zip 与 tar.gz。
+- 未设置任何席位限额时，不注册请求拦截与完成通知，减少无用的插件调用。
+- 更新 README 截图与架构图。
+
+### 修复
+
+- 历史统计缺失或读取失败时显示“统计暂不可用”，不再伪装成 0；Portal 明确标注按当前 Key 统计，管理页按席位汇总。
+- 修复少量 Token 被显示成 `0.000M` 的问题，并兼容 Manager Plus 的标准化输入量与缓存读取量字段。
+
+- 管理页等待旧 key 的撤销与新席位绑定实际生效后，再继续保存，避免 CPA 异步重载期间出现权限空档。
+- 阻止撤销最后一个客户端 key，以免清空 `access.api-keys` 意外关闭 CPA 认证；停用插件前需先撤销买家席位。
+- 一次错误登录只发起一次鉴权请求，避免过早触发 CPA 的管理接口封禁。
+- 保存期间锁定编辑，支持部分保存后的重试和补齐缺失的认证 key；保存前检查配置是否已被其他页面修改。
+- 修复首次配置没有 `users` 字段时无法保存席位的问题；无效的默认限额不再被静默改成不限。
+- 用量数据库缺失或路径指向目录时不再显示已找到数据库，支持包含空格和 `#` 的数据库路径。
+- 增加管理页行为回归测试，并纳入 CI 和 Release 检查。
+
+## [0.3.0] - 2026-10-17
+
+### 新增
+
+- 席位限额：`max-concurrency`（并发请求数）与 `rpm`（每分钟请求数），可在顶层设默认值、在席位上覆盖，`0` 表示不限。同一席位的多个 key 共享限额。
+- 超出限额的请求在选账号之前被拒绝，返回 HTTP 429、`Retry-After` 与 `rate_limit_error`（`seat_concurrency_limit` / `seat_rpm_limit`），客户端会自动退避重试。
+- 插件通过请求拦截器执行席位限额，并通过 `request.complete` 释放并发名额；结束通知丢失的请求最多 30 分钟后自动回收名额。宿主不支持请求完成通知时只执行 RPM 限制并在日志中提示。
+- Portal 显示当前并发与近 1 分钟请求数。
+- Portal 客户端接入引导：按买家的 key 生成 Codex CLI、Claude Code、Cursor、OpenAI 兼容客户端的配置，模型从网关的 `/v1/models` 读取并优先列出与席位类型匹配的模型，一键复制。
+- `public-base-url` 配置项：指定接入引导中展示的网关地址。
+- `/api/status` 新增 `provider`、`public_base_url`、`limits` 字段。
+
+### 变更
+
+- 席位名不能重复（包括留空时自动生成的 `seat-N`），重复视为配置错误。席位名用于限额计数、日志和管理页面。
+
 ## [0.2.0] - 2026-10-16
 
 首个可用于 CLIProxyAPI v8 的原生插件版本。
@@ -51,6 +95,7 @@
 
 - 独立原型（Python + Caddy），验证倒计时算法、一键核销与字段脱敏。该原型未包含在本仓库中。
 
-[Unreleased]: https://github.com/212duo/cpa-plugin-carpool/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/212duo/cpa-plugin-carpool/commits/main
+[0.3.0]: https://github.com/212duo/cpa-plugin-carpool/commit/f05b126
 [0.2.0]: https://github.com/212duo/cpa-plugin-carpool/releases/tag/v0.2.0
 [0.1.0]: https://github.com/212duo/cpa-plugin-carpool/commits/main

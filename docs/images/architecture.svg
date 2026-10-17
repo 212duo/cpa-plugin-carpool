@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600" role="img" aria-labelledby="title desc">
   <title id="title">cpa-plugin-carpool architecture</title>
-  <desc id="desc">Client requests pass CLIProxyAPI key authentication and reach the scheduler, where cpa-carpool routes each managed key only to its bound account and rejects otherwise; unmanaged keys fall back to the built-in scheduler. The buyer portal is served through GET resource routes and reads credentials and cooldown state through host callbacks, and Codex quota from chatgpt.com.</desc>
+  <desc id="desc">Client requests pass CLIProxyAPI key authentication, then the request interceptor, where cpa-carpool applies each seat's concurrency and RPM limits, then the scheduler, where it routes each managed key only to its bound account and rejects otherwise; unmanaged keys fall back to the built-in scheduler. The buyer portal and the owner's admin page are served through resource routes; the admin page's data comes from management routes that need the CPA management key. Both read credentials and cooldown state through host callbacks, and Codex quota from chatgpt.com.</desc>
   <defs>
     <marker id="a-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#94a3b8"/></marker>
     <marker id="a-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#38bdf8"/></marker>
@@ -21,35 +21,41 @@
   <rect width="1000" height="600" rx="16" fill="#0f172a"/>
 
   <!-- Left: callers -->
-  <rect class="box" x="24" y="96" width="210" height="104" rx="10"/>
-  <text class="h" x="40" y="124">AI clients</text>
-  <text class="s" x="40" y="146">Codex CLI · Cursor · Claude Code</text>
-  <text class="m" x="40" y="176">Bearer sk-buyer-…</text>
+  <rect class="box" x="24" y="88" width="210" height="104" rx="10"/>
+  <text class="h" x="40" y="116">AI clients</text>
+  <text class="s" x="40" y="138">Codex CLI · Cursor · Claude Code</text>
+  <text class="m" x="40" y="168">Bearer sk-buyer-…</text>
 
-  <rect class="box" x="24" y="380" width="210" height="96" rx="10"/>
-  <text class="h" x="40" y="408">Buyer's browser</text>
-  <text class="s" x="40" y="430">Self-service portal</text>
-  <text class="m" x="40" y="458">…/portal#key=sk-…</text>
+  <rect class="box" x="24" y="364" width="210" height="112" rx="10"/>
+  <text class="h" x="40" y="392">Browser</text>
+  <text class="s" x="40" y="414">buyer portal · owner admin page</text>
+  <text class="m" x="40" y="440">…/portal#key=sk-…</text>
+  <text class="m" x="40" y="460">…/admin  (mgmt key)</text>
 
   <!-- Middle: CLIProxyAPI -->
   <rect x="268" y="36" width="456" height="532" rx="14" fill="none" stroke="#475569" stroke-width="1.5" stroke-dasharray="6 5"/>
   <text class="h" x="286" y="64" style="font-size:16px">CLIProxyAPI v8</text>
 
-  <rect class="core" x="286" y="96" width="176" height="56" rx="9"/>
-  <text class="h" x="300" y="120" style="font-size:14px">Key authentication</text>
-  <text class="m" x="300" y="140">access.api-keys</text>
+  <rect class="core" x="286" y="96" width="176" height="48" rx="9"/>
+  <text class="h" x="300" y="117" style="font-size:14px">Key authentication</text>
+  <text class="m" x="300" y="135">access.api-keys</text>
 
-  <rect class="core" x="286" y="192" width="176" height="56" rx="9"/>
-  <text class="h" x="300" y="216" style="font-size:14px">Scheduler</text>
-  <text class="m" x="300" y="236">scheduler.pick</text>
+  <rect class="core" x="286" y="168" width="176" height="48" rx="9"/>
+  <text class="h" x="300" y="189" style="font-size:14px">Request interceptor</text>
+  <text class="m" x="300" y="207">intercept · complete</text>
 
-  <rect class="core" x="286" y="288" width="176" height="56" rx="9" stroke-dasharray="4 4"/>
-  <text class="h" x="300" y="312" style="font-size:14px">Built-in scheduler</text>
-  <text class="s" x="300" y="332">all accounts</text>
+  <rect class="core" x="286" y="240" width="176" height="48" rx="9"/>
+  <text class="h" x="300" y="261" style="font-size:14px">Scheduler</text>
+  <text class="m" x="300" y="279">scheduler.pick</text>
 
-  <rect class="core" x="286" y="384" width="176" height="56" rx="9"/>
-  <text class="h" x="300" y="408" style="font-size:14px">Resource routes</text>
-  <text class="s" x="300" y="428">GET only, no admin key</text>
+  <rect class="core" x="286" y="312" width="176" height="44" rx="9" stroke-dasharray="4 4"/>
+  <text class="h" x="300" y="332" style="font-size:14px">Built-in scheduler</text>
+  <text class="s" x="300" y="349">all accounts</text>
+
+  <rect class="core" x="286" y="384" width="176" height="64" rx="9"/>
+  <text class="h" x="300" y="406" style="font-size:14px">Plugin routes</text>
+  <text class="s" x="300" y="424">resources: GET, no key</text>
+  <text class="s" x="300" y="440">management: mgmt key</text>
 
   <rect class="core" x="286" y="480" width="176" height="64" rx="9"/>
   <text class="h" x="300" y="504" style="font-size:14px">Auth manager</text>
@@ -62,8 +68,8 @@
   <rect class="box" x="500" y="124" width="194" height="110" rx="9"/>
   <text class="h" x="514" y="148" style="font-size:14px">Seat router</text>
   <text class="m" x="514" y="170">key → seat → auth ID</text>
-  <text class="s" x="514" y="194">exact match</text>
-  <text class="s" x="514" y="214">fail-closed</text>
+  <text class="s" x="514" y="194">exact match · fail-closed</text>
+  <text class="s" x="514" y="214">concurrency · RPM per seat</text>
 
   <rect class="box" x="500" y="252" width="194" height="98" rx="9"/>
   <text class="h" x="514" y="276" style="font-size:14px">Config loader</text>
@@ -71,10 +77,10 @@
   <text class="s" x="514" y="320">strict parsing</text>
   <text class="s" x="514" y="338">any error → reject all</text>
 
-  <rect class="box" x="500" y="372" width="194" height="80" rx="9"/>
-  <text class="h" x="514" y="396" style="font-size:14px">Portal</text>
-  <text class="m" x="514" y="418">/portal  /api/status</text>
-  <text class="m" x="514" y="438">/api/reset?confirm=1</text>
+  <rect class="box" x="500" y="368" width="194" height="88" rx="9"/>
+  <text class="h" x="514" y="392" style="font-size:14px">Portal &amp; admin</text>
+  <text class="m" x="514" y="414">/portal  /api/*</text>
+  <text class="m" x="514" y="434">/admin   /carpool/*</text>
 
   <rect class="box" x="500" y="470" width="194" height="74" rx="9"/>
   <text class="h" x="514" y="494" style="font-size:14px">Host callbacks</text>
@@ -87,10 +93,11 @@
   <text class="s" x="772" y="148">Seat 1 → Team account A</text>
   <text class="s" x="772" y="170">Seat 2 → Team account B</text>
 
-  <rect class="box" x="756" y="226" width="220" height="86" rx="10" stroke="#ef4444"/>
+  <rect class="box" x="756" y="226" width="220" height="106" rx="10" stroke="#ef4444"/>
   <text class="h" x="772" y="254">Rejected</text>
-  <text class="s" x="772" y="276">seat expired · account unavailable</text>
-  <text class="s" x="772" y="296">invalid plugin config</text>
+  <text class="s" x="772" y="276">429 over concurrency / RPM</text>
+  <text class="s" x="772" y="296">seat expired · account unavailable</text>
+  <text class="s" x="772" y="316">invalid plugin config</text>
 
   <rect class="box" x="756" y="372" width="220" height="80" rx="10" stroke="#f59e0b"/>
   <text class="h" x="772" y="400">chatgpt.com</text>
@@ -98,18 +105,20 @@
   <text class="s" x="772" y="440">Codex seats, cached 30 s</text>
 
   <!-- Request flow -->
-  <path d="M234 136 H280" stroke="#94a3b8" stroke-width="1.6" fill="none" marker-end="url(#a-muted)"/>
-  <path d="M374 152 V186" stroke="#94a3b8" stroke-width="1.6" fill="none" marker-end="url(#a-muted)"/>
-  <path d="M462 214 H480 V182 H494" stroke="#38bdf8" stroke-width="1.6" fill="none" marker-end="url(#a-accent)"/>
+  <path d="M234 120 H280" stroke="#94a3b8" stroke-width="1.6" fill="none" marker-end="url(#a-muted)"/>
+  <path d="M374 144 V162" stroke="#94a3b8" stroke-width="1.6" fill="none" marker-end="url(#a-muted)"/>
+  <path d="M462 192 H494" stroke="#38bdf8" stroke-width="1.6" fill="none" marker-end="url(#a-accent)"/>
+  <path d="M374 216 V234" stroke="#94a3b8" stroke-width="1.6" fill="none" marker-end="url(#a-muted)"/>
+  <path d="M462 264 H482 V222 H494" stroke="#38bdf8" stroke-width="1.6" fill="none" marker-end="url(#a-accent)"/>
   <path d="M694 152 H750" stroke="#22c55e" stroke-width="1.8" fill="none" marker-end="url(#a-green)"/>
   <path d="M694 210 H738 V268 H750" stroke="#ef4444" stroke-width="1.6" fill="none" marker-end="url(#a-red)"/>
-  <path d="M500 226 H476 V316 H468" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="5 4" fill="none" marker-end="url(#a-muted)"/>
-  <text class="lbl" x="372" y="282" text-anchor="middle">unmanaged key</text>
+  <path d="M374 288 V306" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="5 4" fill="none" marker-end="url(#a-muted)"/>
+  <text class="lbl" x="384" y="302">unmanaged key</text>
 
-  <!-- Portal flow -->
-  <path d="M234 424 H280" stroke="#94a3b8" stroke-width="1.6" fill="none" marker-end="url(#a-muted)"/>
+  <!-- Portal / admin flow -->
+  <path d="M234 416 H280" stroke="#94a3b8" stroke-width="1.6" fill="none" marker-end="url(#a-muted)"/>
   <path d="M462 412 H494" stroke="#38bdf8" stroke-width="1.6" fill="none" marker-end="url(#a-accent)"/>
-  <path d="M597 452 V464" stroke="#38bdf8" stroke-width="1.6" fill="none" marker-end="url(#a-accent)"/>
+  <path d="M597 456 V464" stroke="#38bdf8" stroke-width="1.6" fill="none" marker-end="url(#a-accent)"/>
   <path d="M500 512 H468" stroke="#38bdf8" stroke-width="1.6" fill="none" marker-end="url(#a-accent)"/>
   <path d="M694 412 H750" stroke="#f59e0b" stroke-width="1.6" fill="none" marker-end="url(#a-orange)"/>
 </svg>

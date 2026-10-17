@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -19,26 +20,33 @@ var embeddedPortalHTML []byte
 // resetMu serializes reset credit redemptions so a double click never redeems twice.
 var resetMu sync.Mutex
 
-// handleResource routes calls under /v0/resource/plugins/<plugin-id>/*
-func handleResource(raw []byte, table *routingTable, cfg PluginConfig) ([]byte, error) {
+// handleManagement serves management.handle, which CPA uses both for the plugin's
+// Management API routes (under /v0/management/, already authenticated with the
+// management key) and for its unauthenticated resources (under
+// /v0/resource/plugins/<plugin-id>/).
+func handleManagement(raw []byte, table *routingTable, cfg PluginConfig) ([]byte, error) {
 	var req pluginapi.ManagementRequest
 	if err := jsonUnmarshal(raw, &req); err != nil {
 		return nil, err
 	}
+	if strings.HasPrefix(req.Path, managementBasePath+"/") {
+		return handleAdminAPI(req, table, cfg)
+	}
+	return handleResource(req, table, cfg)
+}
 
+// handleResource routes calls under /v0/resource/plugins/<plugin-id>/*
+func handleResource(req pluginapi.ManagementRequest, table *routingTable, cfg PluginConfig) ([]byte, error) {
 	switch resourceSubpath(req.Path) {
 	case RoutePortal:
 		return okEnvelope(pluginapi.ManagementResponse{
 			StatusCode: http.StatusOK,
-			Headers: http.Header{
-				"Content-Type":            []string{"text/html; charset=utf-8"},
-				"Cache-Control":           []string{"no-cache"},
-				"Referrer-Policy":         []string{"no-referrer"},
-				"X-Content-Type-Options":  []string{"nosniff"},
-				"Content-Security-Policy": []string{"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'"},
-			},
-			Body: embeddedPortalHTML,
+			Headers:    pageHeaders(),
+			Body:       embeddedPortalHTML,
 		})
+
+	case RouteAdmin:
+		return serveAdminPage()
 
 	case RouteAPIStatus:
 		return handleAPIStatus(req, table, cfg)
@@ -51,6 +59,18 @@ func handleResource(raw []byte, table *routingTable, cfg PluginConfig) ([]byte, 
 			StatusCode: http.StatusNotFound,
 			Body:       []byte(`{"error":"not_found"}`),
 		})
+	}
+}
+
+// pageHeaders are the response headers of the embedded HTML pages. The pages only
+// talk to their own origin and never leak their URL (which may carry #key=).
+func pageHeaders() http.Header {
+	return http.Header{
+		"Content-Type":            []string{"text/html; charset=utf-8"},
+		"Cache-Control":           []string{"no-cache"},
+		"Referrer-Policy":         []string{"no-referrer"},
+		"X-Content-Type-Options":  []string{"nosniff"},
+		"Content-Security-Policy": []string{"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'"},
 	}
 }
 
@@ -138,7 +158,11 @@ func handleAPIStatus(req pluginapi.ManagementRequest, table *routingTable, cfg P
 	}
 
 	// 2. Token usage recorded by CPA Manager Plus, when its database is present
-	stats := readTokenStats(cfg.DBPath, usageKeyHash(key))
+	stats, usageErr := readTokenStats(cfg.DBPath, usageKeyHash(key))
+	resp.UsageAvailable = usageErr == nil
+	if usageErr != nil && !errors.Is(usageErr, errUsageDBUnavailable) {
+		logf("warn", "usage query failed: %v", usageErr)
+	}
 	resp.LocalCalls = stats.Calls
 	resp.InputTokens = stats.InputTokens
 	resp.OutputTokens = stats.OutputTokens

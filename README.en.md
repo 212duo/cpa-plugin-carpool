@@ -4,13 +4,15 @@
 
 **A lightweight multi-tenant seat plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (CPA)**
 
-*One key, one account · Self-service quota portal · Reset countdowns · Self-service reset credits · Fail-closed configuration*
+*One key, one account · Per-seat concurrency / RPM limits · Self-service quota portal and client setup · Self-service reset credits · Owner admin page · Fail-closed configuration*
 
 [![CI](https://github.com/212duo/cpa-plugin-carpool/actions/workflows/ci.yml/badge.svg)](https://github.com/212duo/cpa-plugin-carpool/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 ![CPA](https://img.shields.io/badge/CLIProxyAPI-v8.0.30%2B-informational)
 
 [简体中文](./README.md) · **English**
+
+This README includes unreleased 0.4.0 features (the owner admin page and plugin store assets). For older downloads, follow the notes for that Release.
 
 [Quick start](#-quick-start) · [Configuration](#-configuration-reference) · [Security](#-security-design) · [Known limitations](#-known-limitations) · [Spec (SPEC.md, Chinese)](./SPEC.md) · [Changelog](./CHANGELOG.md)
 
@@ -29,7 +31,7 @@ When a few people share a ChatGPT Team seat, or a small team hands out accounts,
 * **Plain CPA has no multi-tenancy**: there is no quota page for the people using it, and routing plugins that match by email mix up accounts when one email has several (for example a Team seat and a personal Pro plan);
 * **Hitting a limit means waiting for the admin**: on a 429 the user has to ask the admin to check the quota and reset it by hand.
 
-This plugin runs inside CPA as a native shared library, with no database and no extra process. The admin binds each key to specific accounts in the config; users open the portal with their own key to see their quota and countdowns, and redeem a reset credit themselves when they hit the limit.
+This plugin runs inside CPA as a native shared library, with no database and no extra process. The admin binds each key to specific accounts and sets its limits on the admin page (or in `config.yaml`); users open the portal with their own key to see their quota and countdowns, copy ready-made client configs, and redeem a reset credit themselves when they hit the limit.
 
 ## ✨ Features
 
@@ -38,15 +40,29 @@ This plugin runs inside CPA as a native shared library, with no database and no 
 | **Dedicated scheduling** | A key can only use the accounts bound to it; when they are cooling down or unavailable the request is rejected and **never falls back to other accounts** |
 | **Exact binding** | Accounts are matched by their exact CPA auth ID, so a Team seat and a personal account under the same email never mix |
 | **Lease expiry** | Each seat can have an `expire-at`; after it, scheduling and the portal reject the seat |
+| **Seat limits** | Each seat can cap its concurrent requests and requests per minute (RPM); excess requests get a 429 with `Retry-After`, so no one can max out the shared account |
 | **Fail-closed config** | A broken config makes the plugin reject every request and log the reason, instead of letting buyer keys fall through to the default scheduler and the whole account pool |
-| **Buyer portal** | Usage and reset countdowns for the 5-hour and weekly windows, reset credits, historical token usage |
+| **Buyer portal** | Usage and reset countdowns for the 5-hour and weekly windows, concurrency and RPM usage, reset credits, historical token usage |
+| **Client setup guide** | The portal generates Codex CLI, Claude Code, Cursor and OpenAI-compatible client configs for the buyer's key, ready to copy |
 | **Self-service reset** | Redeems an official reset credit and immediately clears the account's cooldown through a CPA host callback |
+| **Owner admin page** | Add, edit and delete seats, generate random keys, bind accounts, set limits and leases, see account state and usage; changes are validated with the plugin's rules before saving |
 | **Minimal exposure** | Responses to buyers only contain whitelisted fields; no email, account_id or tokens |
 
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/images/portal.png" alt="Buyer portal: seat status, concurrency and RPM usage, quota windows with reset countdowns, token usage and reset credits" width="380"></td>
+    <td align="center"><img src="docs/images/portal-guide.png" alt="Client setup guide in the portal: a Codex CLI config with the gateway address, key and model filled in" width="380"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Buyer portal (demo data; the UI is in Chinese)</sub></td>
+    <td align="center"><sub>Client setup guide in the portal</sub></td>
+  </tr>
+</table>
+
 <p align="center">
-  <img src="docs/images/portal.png" alt="Buyer portal: seat status, quota windows with reset countdowns, token usage and reset credits" width="460">
+  <img src="docs/images/admin.png" alt="Owner admin page: global limit settings and the seat list with bound account state, key count, expiry, limit usage and token usage" width="800">
   <br>
-  <sub>Buyer portal (demo data; the UI is in Chinese)</sub>
+  <sub>Owner admin page (demo data)</sub>
 </p>
 
 ## 🔧 How it works
@@ -56,7 +72,8 @@ This plugin runs inside CPA as a native shared library, with no database and no 
 </p>
 
 * **Scheduling**: the plugin registers as CPA's scheduler plugin. For each request it identifies the caller's key (CPA's `caller_scope`, or the `Authorization` / `x-api-key` header), finds the seat and picks only among the accounts bound to it. Keys that are not configured (such as your own) are handed back to CPA's default scheduler.
-* **Portal**: a page and two endpoints served through CPA's plugin resource routes. Credentials and runtime cooldown state are read through CPA host callbacks; the plugin never reads or writes the auth directory itself.
+* **Limits**: as soon as any seat has a limit, the plugin also registers as a request interceptor. Every request passes its seat's limits before an account is picked and gets a 429 if it is over them; CPA tells the plugin when each request ends, which frees its concurrency slot.
+* **Portal and admin page**: pages served through CPA's plugin resource routes. Buyer endpoints take the buyer's key; admin endpoints live under CPA's Management API and need the management key. Credentials and runtime cooldown state are read through CPA host callbacks, so the plugin never reads or writes the auth directory itself; the admin page saves through CPA's own config API, which writes `config.yaml`.
 
 ## 📋 Compatibility
 
@@ -68,12 +85,15 @@ This plugin runs inside CPA as a native shared library, with no database and no 
 | Portal lookup | File-backed accounts (credential files created by OAuth login) |
 | Quota and reset credits | **Codex (ChatGPT)** accounts only; for other file-backed accounts the portal shows seat status and token usage |
 | Token history | Optional; needs the `usage.sqlite` of [CPA Manager Plus](https://github.com/seakee/CPA-Manager-Plus) |
+| Admin page | Needs a CPA management key (`management.secret-key`); access from other machines also needs `management.allow-remote` |
 
 ## 🚀 Quick start
 
 ### 1. Get the plugin
 
-**Prebuilt**: download `cpa-carpool_<version>_linux_<amd64|arm64>.tar.gz` for your architecture from [Releases](https://github.com/212duo/cpa-plugin-carpool/releases), extract `cpa-carpool.so` and verify it against `SHA256SUMS`.
+**From CPA's plugin store** (once listed in the [official store](https://github.com/router-for-me/CLIProxyAPI-Plugins-Store)): search for `cpa-carpool` in the plugin store of CPA's management panel and install it. CPA downloads the release from this repository, verifies it against `checksums.txt` and installs it as `plugins/linux/<arch>/cpa-carpool-v<version>.so`. Then skip to step 3.
+
+**Prebuilt**: download `cpa-carpool_<version>_linux_<amd64|arm64>.tar.gz` (or the `.zip` of the same name) for your architecture from [Releases](https://github.com/212duo/cpa-plugin-carpool/releases), extract `cpa-carpool.so` and verify it against `checksums.txt`.
 
 **Or build it yourself** (needs Docker; the output matches the toolchain and glibc of the official image):
 
@@ -87,7 +107,7 @@ sh build.sh          # writes out/cpa-carpool.so; pass "test" to run the tests f
 
 Copy `cpa-carpool.so` into the directory configured as `plugins.dir` (by default `plugins/` under the working directory; a platform subdirectory such as `plugins/linux/amd64/` also works).
 
-> The plugin ID is the file name without its extension, so **keep the file name `cpa-carpool.so`** (or a versioned name such as `cpa-carpool-v0.2.0.so`). The config section below must use the same ID.
+> The plugin ID is the file name without its extension and optional `-v<version>` suffix. **Keep the file name `cpa-carpool.so`** (or `cpa-carpool-v0.4.0.so`); both use `cpa-carpool` for the configuration section and resource URLs.
 
 With the official Docker image, mount the plugin directory:
 
@@ -116,14 +136,18 @@ plugins:
     cpa-carpool:
       enabled: true
       priority: 100
+      rpm: 30                 # optional: default requests per minute per seat
       users:
         - name: "TeamA-seat1"
           api-keys: ["sk-buyer-alice"]
           primary: ["codex-xxxxxxxx-a1@example.com-team.json"]
           expire-at: "2026-11-15T23:59:59+08:00"
+          max-concurrency: 2  # optional: at most 2 requests at a time for this seat
 ```
 
 CPA pushes the new config to the plugin when it reloads `config.yaml`, so a restart is usually not needed. The CPA log shows the plugin being loaded; a bad config shows up as `[carpool] invalid plugin configuration ...`.
+
+You can also write just `enabled: true` and add seats later on the [admin page](#-admin-page), which generates keys and updates both `access.api-keys` and the plugin config.
 
 ### 4. Send the portal link to the buyer
 
@@ -131,7 +155,9 @@ CPA pushes the new config to the plugin when it reloads `config.yaml`, so a rest
 https://your-domain/v0/resource/plugins/cpa-carpool/portal#key=sk-buyer-alice
 ```
 
-Use the `#key=` form: everything after `#` stays in the browser and never reaches the server's access logs. The older `?key=` form still works, and the page removes it from the address bar after loading.
+Use the `#key=` form: everything after `#` stays in the browser and never reaches the server's access logs. The older `?key=` form still works, and the page removes it from the address bar after loading. The admin page has a "copy portal link" button for every seat.
+
+Once the buyer opens the portal, its client setup section generates configs for Codex CLI (`~/.codex/config.toml`), Claude Code (`~/.claude/settings.json`), Cursor and OpenAI-compatible clients from their key, with models taken from the gateway's `/v1/models`. If clients reach the gateway at a different address than the one the portal is opened on (for example the portal is used on an internal network), set `public-base-url`.
 
 ## 🧰 Configuration reference
 
@@ -142,12 +168,17 @@ The config lives under `plugins.configs.cpa-carpool`. Parsing is **strict**: a m
 | `enabled` | bool | When `false` the plugin handles nothing (every key uses CPA's default scheduler) |
 | `priority` | int | Plugin priority read by CPA; with several scheduler plugins only the highest one runs |
 | `debug` | bool | Log each scheduling decision to the CPA log (seat names only, never keys) |
-| `db-path` | string | Path to CPA Manager Plus's `usage.sqlite`; auto-detected when empty, usage shows 0 if not found |
+| `db-path` | string | Path to CPA Manager Plus's `usage.sqlite`, visible inside the CPA process or container; auto-detected when empty. Missing or unreadable data is shown as unavailable |
 | `upstream-user-agent` | string | User-Agent for the ChatGPT quota endpoints; empty uses the built-in default |
-| `users[].name` | string | Seat name shown in the portal; defaults to `seat-N` |
+| `public-base-url` | string | The address clients use to reach the gateway (e.g. `https://api.example.com`), shown in the portal's setup guide; empty uses the address the portal was opened on |
+| `max-concurrency` | int | Default concurrent request limit for seats that don't set one; `0` (default) means unlimited |
+| `rpm` | int | Default requests-per-minute limit for seats that don't set one; `0` (default) means unlimited |
+| `users[].name` | string | Seat name shown in the portal, **must be unique**; defaults to `seat-N` |
 | `users[].api-keys` | []string | Keys assigned to the seat, **at least one**; a key may not appear in two seats |
 | `users[].primary` | []string | Bound CPA auth IDs, **at least one**; exact match (case and `.json` suffix ignored) |
 | `users[].expire-at` | string | Optional RFC3339 expiry, e.g. `2026-11-15T23:59:59+08:00` |
+| `users[].max-concurrency` | int | Optional; overrides the default concurrency limit, `0` makes the seat unlimited |
+| `users[].rpm` | int | Optional; overrides the default RPM limit, `0` makes the seat unlimited |
 
 **If validation fails, the plugin rejects every request** (your own key included) and logs the reason. This is deliberate: if the plugin stepped aside instead, buyer keys would reach CPA's default scheduler and the whole account pool.
 
@@ -165,30 +196,89 @@ An auth ID is the account's credential file path **relative to CPA's auth direct
 * **Several people sharing one account**: give several seats the same `primary`, each with its own keys and expiry;
 * **One seat over several accounts**: list several `primary` IDs; scheduling picks among them by CPA priority, while the portal shows and resets the first one that is loaded.
 
+### Token history
+
+History comes from events already collected into CPA Manager Plus's `usage.sqlite`, separately from ChatGPT's quota windows. Installing this plugin alone does not create historical usage records.
+
+* The portal shows the current key's records; the admin page aggregates all keys currently assigned to the seat. Counts include recorded successful and failed requests. Replaced or removed keys no longer contribute to that seat's totals.
+* Both old and new database schemas are supported. New schemas use normalized input and cache-read counts; cache creation is not reported as a cache hit. No matching records means zero usage; a missing, unreadable or incompatible database means unavailable statistics.
+* With separate Docker containers, mount Manager's complete data directory read-only into CPA, for example at `/opt/cpa/manager-data`, and set `db-path` to the path inside the CPA container. Include access to `usage.sqlite-wal` and `usage.sqlite-shm`; copying only the main database can miss recent events. Auto-detection cannot read files in another container.
+
+## ⏳ Seat limits
+
+When several people share one account, you can cap each seat's concurrent requests (`max-concurrency`) and requests per minute (`rpm`) so that no one uses up the account's quota or rate limits:
+
+* Limits apply per **seat**: all keys of a seat share them, and seats don't affect each other.
+* The top-level `max-concurrency` / `rpm` are defaults; a value on the seat wins, and `0` makes that seat unlimited.
+* A request over the limit is rejected before any account is picked, with HTTP 429, a `Retry-After` header and a `rate_limit_error`; clients such as Codex CLI and Claude Code back off and retry.
+* RPM is a sliding 60-second window counted by request start; a concurrency slot is freed when CPA reports the request's end (success, failure or cancellation). If that report is ever lost, the slot is reclaimed after 30 minutes at most.
+* Counters live in CPA's process memory: they reset when CPA restarts and are not shared between CPA instances.
+* The request interception and completion hooks are only registered while at least one seat has a limit, so without limits no request pays any overhead. Usage is only counted then too, and is shown in the buyer portal and on the admin page.
+
+## 🔑 Admin page
+
+```text
+https://your-domain/v0/resource/plugins/cpa-carpool/admin
+```
+
+For first-time setup, configure `management.secret-key`; access from another machine also requires `management.allow-remote: true`. The legacy section name `remote-management` remains supported.
+
+Enter the plain-text management key on the page to:
+
+* add, edit and delete seats, generate random keys (`sk-carpool-` + 48 hex characters), and copy keys or a buyer's portal link;
+* bind accounts picked from those CPA has loaded (API-key accounts from `config.yaml` have to be typed in) and see which seats already use each account;
+* set leases, seat limits and their defaults, `public-base-url` and debug logging;
+* see each seat's account load and cooldown state, current concurrency, requests in the last minute and historical usage.
+
+The page itself contains no data; everything is read with the management key, which is kept only in this browser tab (`sessionStorage`). On "save", the page first has the plugin validate the new config with its strict rules, then uses CPA's `/v8/management/config` API to:
+
+1. revoke the keys of deleted seats from `access.api-keys` (first, so they can never fall through to the default scheduler and the whole pool);
+2. confirm those keys fail CPA authentication, then write `plugins.configs.cpa-carpool`;
+3. confirm the plugin has applied the new bindings, then add new keys to `access.api-keys`.
+
+If a step fails the page stops and says so; no completed step ever gives a key more access than it should have. CPA writes `config.yaml` and reloads it, and the plugin picks up the change.
+
+Keep an owner client key outside the seats in `access.api-keys`. The admin page refuses to revoke the last key, because an empty list disables CPA client authentication. To disable the plugin, delete the seats and save first, then disable it through CPA's plugin manager.
+
+> [!IMPORTANT]
+> The management key can change the whole gateway's configuration. Only open the admin page on trusted devices and always use HTTPS from outside; CPA bans a client IP for 30 minutes after 5 failed management key attempts.
+
 ## 🌐 Portal and API
 
-All routes live under `/v0/resource/plugins/cpa-carpool/` and accept GET only (a limit of CPA's resource routes). The buyer key goes in the `X-Carpool-Key` header (the `key` query parameter is also accepted).
+Buyer routes live under `/v0/resource/plugins/cpa-carpool/` and accept GET only (a limit of CPA's resource routes). The buyer key goes in the `X-Carpool-Key` header (the `key` query parameter is also accepted).
 
 | Route | Description |
 | :--- | :--- |
 | `GET /portal` | Buyer self-service page |
-| `GET /api/status` | Seat status: quota windows, reset credits, cooldown, token usage, expiry |
+| `GET /api/status` | Seat status: quota windows, reset credits, cooldown, limit usage, token usage, expiry |
 | `GET /api/reset?confirm=1` | Redeems one reset credit and clears CPA's cooldown; does nothing without `confirm=1` |
+| `GET /admin` | Owner admin page (the page itself holds no data) |
 
 ```bash
 curl -H "X-Carpool-Key: sk-buyer-alice" \
   https://your-domain/v0/resource/plugins/cpa-carpool/api/status
 ```
 
+Admin routes live under CPA's Management API, which checks the management key first (`Authorization: Bearer <management key>`):
+
+| Route | Description |
+| :--- | :--- |
+| `GET /v0/management/carpool/overview` | Runtime state of each seat: bound account, cooldown, limit usage, token usage (no keys) |
+| `GET /v0/management/carpool/auths` | Accounts loaded in CPA and the seats bound to each, for picking when binding |
+| `POST /v0/management/carpool/validate` | Validates a plugin config (JSON) with the plugin's strict rules without touching the running config |
+
 ## 🔒 Security design
 
 * **Fail closed**: an unparsable or invalid config rejects all requests; an expired seat or unavailable account rejects that seat's requests, which never fall back to other accounts.
 * **Exact matching**: auth IDs are compared exactly, with no prefix, suffix or email matching.
-* **Field whitelist**: the portal only returns quota windows, reset credits (title, status, times), seat name, cooldown state and token usage. Email, account_id and tokens never appear in responses; raw upstream errors only go to the CPA log, and buyers see a generic message.
+* **Field whitelist**: the portal only returns quota windows, reset credits (title, status, times), seat name, seat account type, cooldown state, limit usage and token usage. Email, account_id and tokens never appear in responses; raw upstream errors only go to the CPA log, and buyers see a generic message.
+* **Limit rejections reveal nothing**: a 429 only names the seat and its limit, never the key or account.
+* **Admin endpoints need the management key**: the admin page holds no data; seat state, the account list and validation sit under CPA's Management API, where CPA checks the management key. The overview never returns keys.
+* **Safe save order**: the admin page validates first, revokes deleted keys before writing seats and adds new keys last, so no intermediate state lets a key reach the whole pool.
 * **Keys stay out of URLs**: the portal sends the key in a header and share links use `#key=`, so keys don't end up in gateway or reverse-proxy access logs.
 * **Rate-limited upstream calls**: quota results are cached per account for 30 seconds, so buyers refreshing the page don't hammer ChatGPT; resets run one at a time, so a double click never redeems twice.
 * **No direct access to credential files**: credentials and cooldown state come from CPA host callbacks.
-* **Hardened page**: everything rendered is escaped, and responses carry CSP, `Referrer-Policy: no-referrer` and similar headers.
+* **Hardened pages**: everything the portal and admin page render is escaped, and responses carry CSP, `Referrer-Policy: no-referrer` and similar headers; the management key stays in the tab's `sessionStorage` and never goes into a URL.
 
 The portal does not need CPA's management key; access control rests entirely on keeping buyer keys secret. Always serve it over **HTTPS** and use long random keys (for example `openssl rand -hex 24`). See [SECURITY.md](./SECURITY.md) (Chinese) for how to report vulnerabilities.
 
@@ -198,8 +288,11 @@ The portal does not need CPA's management key; access control rests entirely on 
 * Quota lookup and reset credits only support Codex (ChatGPT) accounts and rely on undocumented endpoints; if those change, this part stops working (scheduling is unaffected).
 * The portal can only look up file-backed accounts. API-key accounts configured in `config.yaml` are bound and scheduled normally, but CPA's host callbacks don't list them to plugins, so the portal reports the account as unavailable.
 * The portal only shows the quota of the first loaded account in `primary`.
-* Token history comes from CPA Manager Plus's database and shows 0 without it.
-* Seats are managed through `config.yaml` only; there is no admin UI yet.
+* Token history depends on CPA Manager Plus collecting events and sharing its database with CPA. Missing or unreadable data is shown as unavailable, rather than zero usage.
+* Limit counters live in CPA's process memory: they reset on restart and are not shared between CPA instances. RPM counts every API call that passes CPA's request interception (including Claude Code's `count_tokens` and the like).
+* The concurrency limit relies on CPA reporting request completion (plugin schema 2 or later, which CPA v8.0.30 has); on a host without it the plugin logs a warning and only enforces RPM.
+* The admin page reads and writes the config through CPA v8's `/v8/management/config` API, and CPA writes `config.yaml` back in the v8 layout when it saves. It checks for configuration changes before saving, but another writer can still race with the write itself; avoid editing in multiple places at once.
+* Prebuilt releases and the plugin store cover Linux amd64 / arm64 only.
 
 ## 🔨 Development
 
@@ -215,15 +308,19 @@ PLATFORM=linux/arm64 sh build.sh   # cross-build for arm64 (needs QEMU support i
 ├── main.go            # C ABI entry points (cgo): plugin init, host callback bridge
 ├── plugin.go          # method dispatch, config loading (strict, fail-closed)
 ├── scheduler.go       # seat compilation, key identification, dedicated scheduling
-├── portal.go          # portal routes and the status / reset endpoints
+├── limiter.go         # per-seat concurrency / RPM limits (request interception and completion)
+├── portal.go          # resource dispatch, portal and the status / reset endpoints
+├── admin.go           # admin endpoints: seat overview, account list, config validation
 ├── host.go            # CPA host callbacks: accounts, credentials, cooldown, logging
 ├── upstream.go        # ChatGPT quota and reset-credit API, 30 s cache, field whitelist
 ├── stats.go           # reads CPA Manager Plus's usage database
 ├── types.go           # config and response types
 ├── portal.html        # single-page buyer portal (embedded at build time)
-├── carpool_test.go    # unit tests (fake CPA host and fake ChatGPT upstream)
+├── admin.html         # owner admin page (embedded at build time)
+├── *_test.go          # unit tests (fake CPA host and fake ChatGPT upstream)
 ├── config.example.yaml
-├── docs/images/       # screenshots and diagrams used by the READMEs
+├── plugin-store/      # registry entry for the CLIProxyAPI plugin store
+├── docs/images/       # screenshots, diagrams and the logo used by the READMEs
 ├── README.md          # Chinese README
 └── build.sh           # Docker build script (golang:1.26-bookworm)
 ```
@@ -234,8 +331,8 @@ Please read [CONTRIBUTING.md](./CONTRIBUTING.md) (Chinese) before contributing. 
 
 - [x] **v0.1.0**: standalone prototype (Python + Caddy) validating the countdowns, one-click reset and field masking
 - [x] **v0.2.0**: native CPA v8 plugin; exact binding, lease expiry, fail-closed config; cooldown cleared through host callbacks
-- [ ] **v0.3.0**: per-key concurrency / RPM limits; client setup guides in the portal (Codex CLI, Cursor, Claude Code)
-- [ ] **v0.4.0**: admin UI (seat management, key generation); publish to the CLIProxyAPI plugin store
+- [x] **v0.3.0**: per-seat concurrency / RPM limits (shared by the seat's keys); client setup guides in the portal (Codex CLI, Claude Code, Cursor, OpenAI-compatible)
+- [x] **v0.4.0**: owner admin page (seat management, key generation, account binding, limits and usage); plugin store release assets and registry entry
 
 ## 📜 Disclaimer
 

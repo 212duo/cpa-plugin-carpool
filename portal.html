@@ -310,9 +310,10 @@ function formatDate(isoStr) {
 }
 
 function formatTokensM(tokens) {
-  if (tokens === undefined || tokens === null) return "0.00M";
+  if (tokens === undefined || tokens === null) return "0";
   const num = Number(tokens);
-  if (isNaN(num) || num <= 0) return "0.00M";
+  if (!Number.isFinite(num) || num <= 0) return "0";
+  if (num < 1000) return String(Math.floor(num));
   const m = num / 1000000;
   if (m >= 100) return m.toFixed(1) + "M";
   if (m >= 0.01) return m.toFixed(2) + "M";
@@ -424,12 +425,15 @@ async function doQuery() {
     const inputTok = d.input_tokens || 0;
     const outputTok = d.output_tokens || 0;
     const cachedTok = d.cached_tokens || 0;
+    const usageAvailable = d.usage_available !== false;
+    const tokens = (n) => usageAvailable ? formatTokensM(n) : "--";
 
-    html += '<div class="stat-row"><span class="stat-label">历史总调用</span><span class="stat-val">' + esc(d.local_calls || 0) + ' 次 · 总计 ' + formatTokensM(totalTok) + '</span></div>';
+    html += '<div class="stat-row"><span class="stat-label">当前 Key 历史调用</span><span class="stat-val">' + (usageAvailable ? esc(d.local_calls || 0) + ' 次 · 总计 ' + tokens(totalTok) + ' tokens' : '统计暂不可用') + '</span></div>';
+    if (!usageAvailable) html += '<div class="alert alert-err">历史用量暂不可用，请稍后重试或联系车主。此状态不表示用量为 0。</div>';
     html += '<div class="token-grid">';
-    html += '<div class="token-col"><div class="token-lbl">输入 (Input)</div><div class="token-val" style="color:var(--text);">' + formatTokensM(inputTok) + '</div></div>';
-    html += '<div class="token-col token-col-mid"><div class="token-lbl">输出 (Output)</div><div class="token-val" style="color:var(--accent);">' + formatTokensM(outputTok) + '</div></div>';
-    html += '<div class="token-col"><div class="token-lbl">缓存读取 (Hit)</div><div class="token-val" style="color:var(--green);">' + formatTokensM(cachedTok) + '</div></div>';
+    html += '<div class="token-col"><div class="token-lbl">输入 (Input)</div><div class="token-val" style="color:var(--text);">' + tokens(inputTok) + '</div></div>';
+    html += '<div class="token-col token-col-mid"><div class="token-lbl">输出 (Output)</div><div class="token-val" style="color:var(--accent);">' + tokens(outputTok) + '</div></div>';
+    html += '<div class="token-col"><div class="token-lbl">缓存读取 (Hit)</div><div class="token-val" style="color:var(--green);">' + tokens(cachedTok) + '</div></div>';
     html += '</div>';
 
     if (quotaSupported) {
@@ -490,9 +494,9 @@ async function doQuery() {
   }
 }
 
+// Usage is only counted while some seat has a limit, so unlimited shows no count.
 function formatLimit(used, limit) {
-  const u = Number(used) || 0;
-  return Number(limit) > 0 ? u + " / " + limit : u + "（不限）";
+  return Number(limit) > 0 ? (Number(used) || 0) + " / " + limit : "不限";
 }
 
 // ---- Client setup guide -------------------------------------------------

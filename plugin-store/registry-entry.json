@@ -1,0 +1,11 @@
+{
+  "id": "cpa-carpool",
+  "name": "Carpool 拼车管家",
+  "description": "Multi-tenant seats for shared accounts: binds each client key to exact CPA accounts with fail-closed scheduling, lease expiry and per-seat concurrency / RPM limits, plus a buyer portal (Codex quota countdown, self-service reset credits, client setup guide) and an owner admin page. / 多人拼车席位：key 精确绑定账号、出错即拒绝、租期到期、席位并发与 RPM 限制，附买家自助 Portal（额度倒计时、自助核销重置卡、客户端接入引导）和车主管理页面。",
+  "author": "212duo",
+  "repository": "https://github.com/212duo/cpa-plugin-carpool",
+  "logo": "https://raw.githubusercontent.com/212duo/cpa-plugin-carpool/main/docs/images/logo.png",
+  "homepage": "https://github.com/212duo/cpa-plugin-carpool",
+  "license": "MIT",
+  "tags": ["Scheduler", "Multi-account", "Isolation", "Rate Limit", "Management", "Codex"]
+}

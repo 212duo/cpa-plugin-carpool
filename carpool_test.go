@@ -85,7 +85,8 @@ func resource(t *testing.T, path string, query url.Values, headers http.Header) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := handleResource(raw, activeTable.Load(), *activeConfig.Load())
+	table := activeTable.Load()
+	out, err := handleManagement(raw, table, table.config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +241,7 @@ func TestConfigureReadsPluginSection(t *testing.T) {
 	if len(table.byKey) != 3 {
 		t.Fatalf("got %d keys, want 3", len(table.byKey))
 	}
-	if got := activeConfig.Load().UpstreamUserAgent; got != "test-agent/1.0" {
+	if got := activeTable.Load().config.UpstreamUserAgent; got != "test-agent/1.0" {
 		t.Fatalf("upstream-user-agent = %q", got)
 	}
 }
@@ -595,13 +596,16 @@ func TestReadTokenStatsFromManagerPlusDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := readTokenStats(dbPath, usageKeyHash("sk-alice"))
+	got, err := readTokenStats(dbPath, usageKeyHash("sk-alice"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := TokenStats{Calls: 2, InputTokens: 1100, OutputTokens: 220, CachedTokens: 50, TotalTokens: 1370}
 	if got != want {
 		t.Fatalf("readTokenStats = %+v, want %+v", got, want)
 	}
-	if got := readTokenStats(filepath.Join(t.TempDir(), "missing.sqlite"), usageKeyHash("sk-alice")); got != (TokenStats{}) {
-		t.Fatalf("missing database returned %+v", got)
+	if got, err := readTokenStats(filepath.Join(t.TempDir(), "missing.sqlite"), usageKeyHash("sk-alice")); err == nil || got != (TokenStats{}) {
+		t.Fatalf("missing database returned %+v, %v", got, err)
 	}
 }
 

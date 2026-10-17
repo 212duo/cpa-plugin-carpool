@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拼车管家 · 管理</title>
+<style>
+:root {
+  --bg: #0f172a;
+  --card: #1e293b;
+  --inset: #0b1120;
+  --deep: #070d17;
+  --border: #334155;
+  --text: #f8fafc;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --accent-hover: #0ea5e9;
+  --green: #22c55e;
+  --red: #ef4444;
+  --orange: #f59e0b;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 14px;
+  padding-bottom: 96px;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.95);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.brand { font-weight: 700; font-size: 16px; color: var(--accent); }
+.brand span { color: var(--muted); font-weight: 500; margin-left: 4px; }
+.spacer { flex: 1; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+main { max-width: 1120px; margin: 0 auto; padding: 24px 16px; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 18px;
+}
+.card-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.card-head h2 { font-size: 15px; font-weight: 600; }
+.login { max-width: 460px; margin: 56px auto; }
+.login h1 { font-size: 18px; color: var(--accent); margin-bottom: 8px; }
+.login p { color: var(--muted); font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+input[type="text"], input[type="password"], input[type="number"], input[type="datetime-local"], select {
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  width: 100%;
+  min-width: 0;
+}
+input:focus, select:focus { border-color: var(--accent); }
+input.mono, .mono { font-family: monospace; }
+input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; vertical-align: middle; }
+.btn {
+  background: var(--accent);
+  color: #0f172a;
+  font-weight: 600;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--accent-hover); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.ghost { background: transparent; color: var(--accent); border-color: var(--border); }
+.btn.ghost:hover { border-color: var(--accent); }
+.btn.danger { background: transparent; color: var(--red); border-color: rgba(239, 68, 68, 0.5); }
+.btn.danger:hover { background: rgba(239, 68, 68, 0.12); }
+.btn.tiny { padding: 3px 8px; font-size: 12px; font-weight: 500; }
+.row { display: flex; gap: 8px; align-items: center; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.field label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.field .hint { color: var(--muted); font-size: 11px; margin-top: 5px; line-height: 1.5; }
+.check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; padding-top: 6px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 14px; }
+details[open] summary { margin-bottom: 12px; }
+.alert { padding: 11px 14px; border-radius: 10px; margin-bottom: 12px; font-size: 13px; line-height: 1.55; border: 1px solid; }
+.alert-err { background: rgba(239, 68, 68, 0.12); color: #fca5a5; border-color: rgba(239, 68, 68, 0.6); }
+.alert-warn { background: rgba(245, 158, 11, 0.12); color: #fcd34d; border-color: rgba(245, 158, 11, 0.5); }
+.alert-info { background: rgba(56, 189, 248, 0.08); color: var(--muted); border-color: var(--border); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 860px; }
+th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+td { padding: 12px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); vertical-align: top; font-size: 13px; }
+tr:last-child td { border-bottom: none; }
+.seat-name { font-weight: 600; }
+.sub { color: var(--muted); font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; margin: 2px 4px 0 0; }
+.b-green { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+.b-orange { background: rgba(245, 158, 11, 0.15); color: var(--orange); }
+.b-red { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+.b-blue { background: rgba(56, 189, 248, 0.15); color: var(--accent); }
+.b-gray { background: rgba(148, 163, 184, 0.15); color: var(--muted); }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.empty { text-align: center; color: var(--muted); padding: 28px 0; }
+.save-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(30, 41, 59, 0.98);
+  border-top: 1px solid var(--accent);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 6;
+}
+.save-bar .msg { flex: 1; font-size: 13px; }
+dialog {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0;
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  margin: auto;
+}
+dialog::backdrop { background: rgba(2, 6, 23, 0.7); }
+.dlg-body { padding: 20px; overflow-y: auto; max-height: calc(100vh - 140px); }
+.dlg-head { padding: 16px 20px; border-bottom: 1px solid var(--border); font-weight: 600; }
+.dlg-foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+.dlg-foot .err { flex: 1; color: #fca5a5; font-size: 12px; }
+.section { margin-bottom: 18px; }
+.section > label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.list-item { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  margin: 0 6px 6px 0;
+  font-family: monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.chip button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; }
+.chip button:hover { color: var(--red); }
+#toast {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--deep);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 13px;
+  z-index: 20;
+  max-width: calc(100vw - 32px);
+  display: none;
+}
+@media (max-width: 640px) {
+  .topbar { padding: 12px 16px; }
+  .save-bar { padding: 10px 16px; flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🚗 拼车管家<span>管理</span></div>
+  <div class="spacer"></div>
+  <div id="topMeta" class="muted small"></div>
+  <button id="refreshBtn" class="btn ghost tiny" hidden>刷新</button>
+  <button id="logoutBtn" class="btn ghost tiny" hidden>退出</button>
+</header>
+
+<main id="app"></main>
+
+<div id="saveBar" class="save-bar" hidden>
+  <div class="msg" id="saveMsg">有未保存的更改</div>
+  <button class="btn ghost" id="discardBtn">放弃更改</button>
+  <button class="btn" id="saveBtn">保存更改</button>
+</div>
+
+<dialog id="seatDialog"></dialog>
+<div id="toast"></div>
+
+<script>
+// This page holds no data until the owner enters the CPA management key. It reads
+// runtime state from the plugin's /v0/management/carpool/* routes and reads and
+// writes the configuration through CPA's /v8/management/config API, so seats end up
+// in config.yaml exactly as if they had been typed there. The key is kept in
+// sessionStorage only (this tab), never in the URL.
+
+const pluginId = (window.location.pathname.match(/\/v0\/resource\/plugins\/([^/]+)\//) || [])[1] || "cpa-carpool";
+const gatewayRoot = window.location.pathname.split("/v0/resource/plugins/")[0].replace(/\/+$/, "");
+const CFG_PATH = "/v8/management/config/plugins/configs/" + encodeURIComponent(pluginId);
+const KEYS_PATH = "/v8/management/config/access/api-keys";
+const API = "/v0/management/carpool";
+const STORE_KEY = "carpool-management-key";
+
+const S = {
+  key: storageGet(),
+  original: null,      // plugins.configs.<id> as loaded
+  draft: null,         // edited copy
+  configExists: true,
+  apiKeys: [],         // access.api-keys
+  overview: null,
+  auths: [],
+  authsError: "",
+  edit: null,          // { idx, seat, expireOn, expireInput, expireOrig, error }
+  saving: false,
+  loading: false,
+  saveError: "",
+};
+
+function storageGet() {
+  try { return sessionStorage.getItem(STORE_KEY) || ""; } catch (e) { return ""; }
+}
+function storageSet(v) {
+  try { v ? sessionStorage.setItem(STORE_KEY, v) : sessionStorage.removeItem(STORE_KEY); } catch (e) {}
+}
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[ch]);
+}
+
+function clone(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
+
+function toast(msg, ms) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.style.display = "block";
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => { el.style.display = "none"; }, ms || 2600);
+}
+
+async function mgmt(method, path, body) {
+  const headers = { "Authorization": "Bearer " + S.key };
+  const init = { method, cache: "no-store", headers, signal: AbortSignal.timeout(10000) };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  const res = await fetch(gatewayRoot + path, init);
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  return { res, data };
+}
+
+function errText(r, fallback) {
+  const d = r && r.data;
+  if (d && typeof d === "object") {
+    if (d.message) return String(d.error ? d.error + ": " + d.message : d.message);
+    if (d.error) return String(d.error);
+  }
+  return (fallback || "请求失败") + (r && r.res ? "（HTTP " + r.res.status + "）" : "");
+}
+
+function authFailed(r) { return r.res.status === 401 || r.res.status === 403; }
+
+// ---- Loading ------------------------------------------------------------
+
+async function loadAll(afterSave = false) {
+  if (S.loading || (S.saving && !afterSave)) return;
+  S.loading = true;
+  renderSaveBar();
+  try {
+    const app = document.getElementById("app");
+    if (!S.original) app.innerHTML = '<div class="empty">正在读取配置…</div>';
+    let cfgR, keysR, ovR, authsR;
+    try {
+      // Authenticate once before issuing the other requests. Four parallel failed
+      // requests would nearly exhaust CPA's five-attempt lockout on a single login.
+      ovR = await mgmt("GET", API + "/overview");
+      if (!authFailed(ovR) && ovR.res.ok) {
+        [cfgR, keysR, authsR] = await Promise.all([
+          mgmt("GET", CFG_PATH), mgmt("GET", KEYS_PATH), mgmt("GET", API + "/auths"),
+        ]);
+      }
+    } catch (e) {
+      renderLogin("无法连接网关：" + e.message);
+      return;
+    }
+    for (const r of [ovR, cfgR, keysR, authsR].filter(Boolean)) {
+      if (authFailed(r)) {
+        storageSet("");
+        S.key = "";
+        renderLogin("管理密钥无效或无权访问：" + errText(r));
+        return;
+      }
+    }
+    if (ovR.res.status === 404) {
+      renderFatal("网关上没有找到拼车管家的管理接口。请确认插件已加载且版本不低于 0.4.0，并且 CPA 已配置 management.secret-key。");
+      return;
+    }
+    if (!ovR.res.ok || !ovR.data) { renderFatal("读取插件状态失败：" + errText(ovR)); return; }
+    if (cfgR.res.status === 404) {
+      S.configExists = false;
+      S.original = { enabled: true, users: [] };
+    } else if (cfgR.res.ok && cfgR.data && typeof cfgR.data === "object") {
+      S.configExists = true;
+      S.original = cfgR.data;
+    } else {
+      renderFatal("读取插件配置失败：" + errText(cfgR) + "。管理页面需要 CPA v8 的 /v8/management/config 接口。");
+      return;
+    }
+    if (keysR.res.status === 404) S.apiKeys = [];
+    else if (keysR.res.ok && Array.isArray(keysR.data)) S.apiKeys = keysR.data.map(String);
+    else { renderFatal("读取 access.api-keys 失败：" + errText(keysR)); return; }
+
+    S.overview = ovR.data;
+    if (authsR.res.ok && authsR.data && Array.isArray(authsR.data.auths)) {
+      S.auths = authsR.data.auths;
+      S.authsError = "";
+    } else {
+      S.auths = [];
+      S.authsError = errText(authsR, "读取账号列表失败");
+    }
+    S.draft = clone(S.original);
+    if (!Array.isArray(S.draft.users)) S.draft.users = [];
+    render();
+    return true;
+  } finally {
+    S.loading = false;
+    renderSaveBar();
+  }
+}
+
+async function refreshOverview() {
+  if (!S.key || !S.draft || S.saving || S.loading) return;
+  try {
+    const r = await mgmt("GET", API + "/overview");
+    if (r.res.ok && r.data) {
+      S.overview = r.data;
+      // Do not re-render under the owner's cursor.
+      const active = document.activeElement;
+      const typing = active && document.getElementById("app").contains(active) && active.matches("input, select");
+      if (!document.getElementById("seatDialog").open && !typing) renderMain();
+    }
+  } catch (e) {}
+}
+
+// ---- Helpers over the draft ---------------------------------------------
+
+function users(cfg) { return (cfg && Array.isArray(cfg.users)) ? cfg.users : []; }
+function seatKeys(seat) { return (Array.isArray(seat["api-keys"]) ? seat["api-keys"] : []).map((k) => String(k).trim()).filter(Boolean); }
+function allKeys(cfg) { return users(cfg).flatMap(seatKeys); }
+function intOr(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
+function dirty() { return JSON.stringify(S.draft) !== JSON.stringify(S.original); }
+function needsSave() { return S.draft && (dirty() || !S.configExists || allKeys(S.draft).some((k) => !S.apiKeys.includes(k))); }
+function runtimeSeat(name) { return ((S.overview && S.overview.seats) || []).find((s) => s.name === name); }
+function savedSeat(name) { return users(S.original).find((s) => String(s.name || "").trim() === name); }
+
+function seatDisplayName(seat, i) {
+  const n = String(seat.name || "").trim();
+  return n || "seat-" + (i + 1);
+}
+
+function portalLink(key) {
+  return window.location.origin + gatewayRoot + "/v0/resource/plugins/" + encodeURIComponent(pluginId) + "/portal#key=" + encodeURIComponent(key);
+}
+
+function generateKey() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return "sk-carpool-" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function formatTokensM(tokens) {
+  const num = Number(tokens) || 0;
+  if (num <= 0) return "0M";
+  if (num < 1000) return String(Math.floor(num));
+  const m = num / 1e6;
+  return (m >= 100 ? m.toFixed(1) : m >= 0.01 ? m.toFixed(2) : m.toFixed(3)) + "M";
+}
+
+function pad(n) { return String(n).padStart(2, "0"); }
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso || "");
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+
+// datetime-local <-> RFC3339 in the browser's time zone.
+function toLocalInput(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+function fromLocalInput(v) {
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "";
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? "+" : "-";
+  const abs = Math.abs(off);
+  return v.slice(0, 16) + ":00" + sign + pad(Math.floor(abs / 60)) + ":" + pad(abs % 60);
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e2) {}
+    ta.remove();
+  }
+  toast("已复制到剪贴板");
+}
+
+// ---- Rendering ----------------------------------------------------------
+
+function renderLogin(error) {
+  S.original = null;
+  S.draft = null;
+  document.getElementById("logoutBtn").hidden = true;
+  document.getElementById("refreshBtn").hidden = true;
+  document.getElementById("saveBar").hidden = true;
+  document.getElementById("topMeta").textContent = "";
+  document.getElementById("app").innerHTML =
+    '<div class="card login">' +
+    '<h1>车主管理后台</h1>' +
+    '<p>输入 CPA 的管理密钥（config.yaml 中 management.secret-key 对应的明文）。密钥只保存在当前标签页，关闭即清除。</p>' +
+    (error ? '<div class="alert alert-err">' + esc(error) + '</div>' : '') +
+    '<form id="loginForm" class="row">' +
+    '<input type="password" id="mgmtKey" placeholder="管理密钥" autocomplete="current-password" spellcheck="false">' +
+    '<button class="btn" type="submit">连接</button>' +
+    '</form>' +
+    '<p class="small" style="margin-top:12px;">从非本机访问时需要在 CPA 中开启 management.allow-remote，并务必使用 HTTPS。连续输错 5 次，CPA 会把来源 IP 封禁 30 分钟。</p>' +
+    '</div>';
+  document.getElementById("mgmtKey").focus();
+}
+
+function renderFatal(msg) {
+  S.original = null;
+  S.draft = null;
+  document.getElementById("app").innerHTML = '<div class="alert alert-err">' + esc(msg) + '</div>';
+}
+
+function render() {
+  document.getElementById("logoutBtn").hidden = false;
+  document.getElementById("refreshBtn").hidden = false;
+  renderMain();
+}
+
+function renderMain() {
+  const ov = S.overview || {};
+  document.getElementById("topMeta").textContent = "插件 " + pluginId + " · v" + (ov.plugin_version || "?");
+  let html = renderAlerts() + renderSettings() + renderSeats();
+  document.getElementById("app").innerHTML = html;
+  renderSaveBar();
+}
+
+function renderAlerts() {
+  const ov = S.overview || {};
+  let html = "";
+  if (ov.config_error) {
+    html += '<div class="alert alert-err"><b>当前生效的插件配置无效，插件正在拒绝所有请求。</b><br>' + esc(ov.config_error) + '</div>';
+  }
+  if (S.draft.enabled === false) {
+    html += '<div class="alert alert-warn"><b>插件处于停用状态。</b>停用时所有 key（包括买家的）都走 CPA 默认调度，买家可以用到整个号池。</div>';
+  }
+  if (!S.configExists) {
+    html += '<div class="alert alert-info">config.yaml 中还没有 plugins.configs.' + esc(pluginId) + ' 配置段，保存时会自动创建。</div>';
+  }
+  if (ov.legacy_host) {
+    html += '<div class="alert alert-warn">当前 CPA 版本不会通知插件请求何时结束，并发上限不会生效（RPM 限制仍然生效）。</div>';
+  }
+  const missing = allKeys(S.draft).filter((k) => !S.apiKeys.includes(k));
+  if (missing.length > 0) {
+    html += '<div class="alert alert-warn">' + missing.length + ' 个席位 key 不在 access.api-keys 中，这些 key 目前无法通过 CPA 认证。保存更改时会自动补上。</div>';
+  }
+  if (S.authsError) {
+    html += '<div class="alert alert-warn">' + esc(S.authsError) + '。绑定账号时需要手动填写账号 ID。</div>';
+  }
+  if (ov.usage_available === false) {
+    html += '<div class="alert alert-warn">历史用量暂不可用。请检查 db-path、数据库是否已挂载到 CPA，以及读取权限和 Manager Plus 数据库版本。此状态不表示用量为 0。</div>';
+  }
+  return html;
+}
+
+function renderSettings() {
+  const d = S.draft;
+  const text = (name, label, hint, placeholder) =>
+    '<div class="field"><label>' + esc(label) + '</label><input type="text" data-setting="' + name + '" value="' + esc(d[name] ?? "") + '" placeholder="' + esc(placeholder || "") + '" spellcheck="false">' +
+    (hint ? '<div class="hint">' + esc(hint) + '</div>' : '') + '</div>';
+  const num = (name, label, hint) =>
+    '<div class="field"><label>' + esc(label) + '</label><input type="number" min="0" step="1" data-setting="' + name + '" value="' + esc(intOr(d[name], 0)) + '">' +
+    '<div class="hint">' + esc(hint) + '</div></div>';
+  return '<section class="card">' +
+    '<div class="card-head"><h2>全局设置</h2></div>' +
+    '<div class="grid">' +
+    '<div class="field"><label>插件状态</label><span class="badge b-green">运行中</span><div class="hint">停用前请先删除席位并保存，再通过 CPA 的插件管理停用。</div></div>' +
+    num("max-concurrency", "默认并发上限", "席位未单独设置时使用，0 为不限") +
+    num("rpm", "默认每分钟请求上限", "席位未单独设置时使用，0 为不限") +
+    text("public-base-url", "公开访问地址", "Portal 接入引导里展示给买家的网关地址，留空使用买家打开 Portal 的地址", "https://api.example.com") +
+    '</div>' +
+    '<details><summary>高级设置</summary><div class="grid">' +
+    '<div class="field"><label>调试日志</label><label class="check"><input type="checkbox" data-setting="debug"' + (d.debug ? " checked" : "") + '> 记录每次调度决定</label></div>' +
+    text("db-path", "用量数据库路径", "CPA Manager Plus 的 usage.sqlite，留空自动探测", "/opt/cpa/manager-data/usage.sqlite") +
+    text("upstream-user-agent", "上游 User-Agent", "查询 ChatGPT 额度时使用，留空用内置默认值", "") +
+    '</div></details>' +
+    '</section>';
+}
+
+function effectiveLimit(seat, field) {
+  return seat[field] !== undefined && seat[field] !== null ? intOr(seat[field], 0) : intOr(S.draft[field], 0);
+}
+
+function renderSeats() {
+  const list = users(S.draft);
+  const ov = S.overview || {};
+  let html = '<section class="card"><div class="card-head"><h2>席位（' + list.length + '）</h2><div class="spacer"></div>' +
+    '<button class="btn" data-act="add">+ 新增席位</button></div>';
+  if (list.length === 0) {
+    return html + '<div class="empty">还没有席位。点击「新增席位」把 key 绑定到一个 CPA 账号。</div></section>';
+  }
+  html += '<div class="table-wrap"><table><thead><tr>' +
+    '<th>席位</th><th>绑定账号</th><th>Key</th><th>到期</th><th>限额（当前 / 上限）</th><th>用量' + (ov.usage_database ? '' : '<span title="未找到 CPA Manager Plus 用量数据库"> ⓘ</span>') + '</th><th>操作</th>' +
+    '</tr></thead><tbody>';
+  list.forEach((seat, i) => {
+    const name = seatDisplayName(seat, i);
+    const saved = savedSeat(name);
+    const changed = !saved || JSON.stringify(saved) !== JSON.stringify(seat);
+    const rt = changed ? null : runtimeSeat(name);
+    const keys = seatKeys(seat);
+    const missing = keys.filter((k) => !S.apiKeys.includes(k)).length;
+    const primary = Array.isArray(seat.primary) ? seat.primary : [];
+
+    let badges = "";
+    if (!saved) badges += '<span class="badge b-blue">新增 · 未保存</span>';
+    else if (changed) badges += '<span class="badge b-blue">已修改 · 未保存</span>';
+    const exp = seat["expire-at"];
+    const expired = exp && new Date(exp).getTime() < Date.now();
+    if (expired) badges += '<span class="badge b-red">已到期</span>';
+
+    let account = '<div class="mono small">' + esc(primary[0] || "--") + '</div>';
+    if (primary.length > 1) account += '<div class="sub">另有 ' + (primary.length - 1) + ' 个备用账号</div>';
+    if (rt) {
+      if (rt.auth) {
+        account += '<div>' + (rt.auth.provider ? '<span class="badge b-gray">' + esc(rt.auth.provider) + '</span>' : '');
+        if (rt.auth.disabled) account += '<span class="badge b-red">已停用</span>';
+        else if (rt.auth.cooling) account += '<span class="badge b-orange">冷却中</span>';
+        else if (rt.auth.unavailable || (rt.auth.status && rt.auth.status !== "active")) account += '<span class="badge b-red">不可用</span>';
+        else account += '<span class="badge b-green">可用</span>';
+        if (rt.auth.id && primary[0] && rt.auth.id.toLowerCase().replace(/\.json$/, "") !== String(primary[0]).toLowerCase().replace(/\.json$/, "")) {
+          account += '<div class="sub">当前使用 ' + esc(rt.auth.id) + '</div>';
+        }
+        account += '</div>';
+      } else {
+        account += '<span class="badge b-red">CPA 中未加载</span>';
+      }
+    }
+
+    const mc = effectiveLimit(seat, "max-concurrency");
+    const rpm = effectiveLimit(seat, "rpm");
+    // Usage is only counted while some seat has a limit, so unlimited shows no count.
+    const lim = (rt && rt.limits) || {};
+    const used = (n, max) => max > 0 ? (rt ? esc(n || 0) + ' / ' : '') + max : '不限';
+    const limits = '<div>并发 ' + used(lim.active, mc) + '</div>' +
+      '<div class="sub">RPM ' + used(lim.recent_requests, rpm) + '</div>';
+
+    const usage = rt && ov.usage_available !== false ? '<div>' + esc(rt.usage.local_calls || 0) + ' 次</div><div class="sub">' + formatTokensM(rt.usage.total_tokens) + ' tokens</div>' : '<span class="muted">--</span>';
+
+    html += '<tr>' +
+      '<td><div class="seat-name">' + esc(name) + '</div>' + badges + '</td>' +
+      '<td>' + account + '</td>' +
+      '<td>' + keys.length + ' 个' + (missing ? '<div><span class="badge b-orange">' + missing + ' 个未加入 access</span></div>' : '') + '</td>' +
+      '<td>' + (exp ? esc(formatDate(exp)) : '<span class="muted">永久</span>') + '</td>' +
+      '<td>' + limits + '</td>' +
+      '<td>' + usage + '</td>' +
+      '<td><div class="actions">' +
+      '<button class="btn ghost tiny" data-act="edit" data-idx="' + i + '">编辑</button>' +
+      (keys.length ? '<button class="btn ghost tiny" data-act="portal" data-idx="' + i + '">复制 Portal 链接</button>' : '') +
+      '<button class="btn danger tiny" data-act="delete" data-idx="' + i + '">删除</button>' +
+      '</div></td></tr>';
+  });
+  return html + '</tbody></table></div></section>';
+}
+
+function renderSaveBar() {
+  const bar = document.getElementById("saveBar");
+  const isDirty = needsSave();
+  bar.hidden = !S.draft || (!isDirty && !S.saving && !S.saveError);
+  document.getElementById("saveBtn").disabled = S.saving || S.loading;
+  document.getElementById("discardBtn").disabled = S.saving || S.loading;
+  document.getElementById("refreshBtn").disabled = S.saving || S.loading;
+  document.getElementById("logoutBtn").disabled = S.saving || S.loading;
+  document.querySelectorAll("#app input, #app select, #app button").forEach((el) => { el.disabled = S.saving || S.loading; });
+  if (!S.saving) document.getElementById("saveMsg").textContent = S.saveError || "有未保存的更改：保存后写入 config.yaml，CPA 会自动重载。";
+}
+
+// ---- Seat editor --------------------------------------------------------
+
+function openEditor(idx) {
+  const seat = idx >= 0 ? clone(users(S.draft)[idx]) : { name: "", "api-keys": [generateKey()], primary: [] };
+  if (!Array.isArray(seat["api-keys"])) seat["api-keys"] = [];
+  if (!Array.isArray(seat.primary)) seat.primary = [];
+  const exp = seat["expire-at"] || "";
+  S.edit = { idx, seat, expireOn: !!exp, expireOrig: exp, expireInput: exp ? toLocalInput(exp) : "", error: "" };
+  renderEditor();
+  document.getElementById("seatDialog").showModal();
+}
+
+function renderEditor() {
+  const e = S.edit;
+  const seat = e.seat;
+  const keys = seat["api-keys"];
+  const primary = seat.primary;
+  const defMC = intOr(S.draft["max-concurrency"], 0);
+  const defRPM = intOr(S.draft.rpm, 0);
+
+  let html = '<div class="dlg-head">' + (e.idx >= 0 ? "编辑席位" : "新增席位") + '</div><div class="dlg-body">';
+
+  html += '<div class="section"><label>席位名称（买家在 Portal 上看到，不能重复）</label>' +
+    '<input type="text" data-ed="name" value="' + esc(seat.name || "") + '" placeholder="例如 TeamA-席位1"></div>';
+
+  html += '<div class="section"><label>API Keys（同一席位的 key 共享限额；保存时会自动加入 access.api-keys）</label>';
+  keys.forEach((k, i) => {
+    html += '<div class="list-item"><input type="text" class="mono" data-ed="key" data-i="' + i + '" value="' + esc(k) + '" spellcheck="false">' +
+      '<button class="btn ghost tiny" data-ed-act="copy-key" data-i="' + i + '">复制</button>' +
+      '<button class="btn ghost tiny" data-ed-act="copy-portal" data-i="' + i + '">Portal 链接</button>' +
+      '<button class="btn danger tiny" data-ed-act="del-key" data-i="' + i + '">移除</button></div>';
+  });
+  html += '<div class="row" style="margin-top:6px;"><button class="btn ghost tiny" data-ed-act="gen-key">+ 生成随机 key</button>' +
+    '<button class="btn ghost tiny" data-ed-act="add-key">+ 手动填写</button></div></div>';
+
+  html += '<div class="section"><label>绑定账号（CPA 账号 ID，精确匹配；写多个时按 CPA 优先级调度，Portal 显示第一个）</label><div>';
+  if (primary.length === 0) html += '<div class="muted small" style="margin-bottom:8px;">还没有绑定账号</div>';
+  primary.forEach((id, i) => {
+    html += '<span class="chip">' + esc(id) + '<button title="移除" data-ed-act="del-primary" data-i="' + i + '">×</button></span>';
+  });
+  html += '</div>';
+  const options = S.auths.filter((a) => !primary.some((p) => normId(p) === normId(a.id)));
+  if (options.length > 0) {
+    html += '<div class="row" style="margin-top:4px;"><select id="authPick"><option value="">从 CPA 账号中选择…</option>' +
+      options.map((a) => {
+        const parts = [a.id];
+        if (a.email || a.label) parts.push(a.email || a.label);
+        if (a.provider) parts.push(a.provider);
+        if (a.disabled) parts.push("已停用");
+        if (a.seats && a.seats.length) parts.push("已绑定：" + a.seats.join("、"));
+        return '<option value="' + esc(a.id) + '">' + esc(parts.join(" · ")) + '</option>';
+      }).join("") +
+      '</select><button class="btn ghost tiny" data-ed-act="pick-auth">添加</button></div>';
+  }
+  html += '<div class="row" style="margin-top:6px;"><input type="text" class="mono" id="authManual" placeholder="或手动填写账号 ID，例如 codex-xxxx@example.com-team.json" spellcheck="false">' +
+    '<button class="btn ghost tiny" data-ed-act="add-primary">添加</button></div>' +
+    '<div class="field"><div class="hint">config.yaml 中配置的 API Key 类账号不会出现在列表里，需要手动填写。多个席位可以绑定同一个账号（多人拼一个号）。</div></div></div>';
+
+  html += '<div class="section"><label>租期</label>' +
+    '<label class="check"><input type="checkbox" data-ed="expire-on"' + (e.expireOn ? " checked" : "") + '> 设置到期时间（按本机时区）</label>' +
+    (e.expireOn ? '<div style="margin-top:8px; max-width:280px;"><input type="datetime-local" data-ed="expire" value="' + esc(e.expireInput) + '"></div>' : '') +
+    '</div>';
+
+  const lim = (field, label, def) =>
+    '<div class="field"><label>' + label + '</label><input type="number" min="0" step="1" data-ed="' + field + '" value="' +
+    esc(seat[field] !== undefined && seat[field] !== null ? seat[field] : "") + '" placeholder="留空使用默认值（' + (def > 0 ? def : "不限") + '）"></div>';
+  html += '<div class="section"><label>限额（留空继承全局默认，0 表示不限）</label><div class="grid">' +
+    lim("max-concurrency", "并发上限", defMC) + lim("rpm", "每分钟请求上限", defRPM) + '</div></div>';
+
+  html += '</div><div class="dlg-foot"><div class="err">' + esc(e.error) + '</div>' +
+    '<button class="btn ghost" data-ed-act="cancel">取消</button>' +
+    '<button class="btn" data-ed-act="ok">确定</button></div>';
+  document.getElementById("seatDialog").innerHTML = html;
+}
+
+function normId(id) { return String(id || "").trim().toLowerCase().replace(/\\/g, "/").replace(/\.json$/, ""); }
+
+function finishEditor() {
+  const e = S.edit;
+  const seat = e.seat;
+  seat.name = String(seat.name || "").trim();
+  seat["api-keys"] = seat["api-keys"].map((k) => String(k).trim()).filter(Boolean);
+  seat.primary = seat.primary.map((p) => String(p).trim()).filter(Boolean);
+
+  const list = users(S.draft);
+  const otherSeats = list.filter((_, i) => i !== e.idx);
+  const fail = (msg) => { e.error = msg; renderEditor(); };
+
+  if (!seat.name) return fail("请填写席位名称");
+  if (otherSeats.some((s, i) => seatDisplayName(s, list.indexOf(s)) === seat.name)) return fail("席位名称「" + seat.name + "」已被使用");
+  if (seat["api-keys"].length === 0) return fail("至少需要一个 key");
+  if (new Set(seat["api-keys"]).size !== seat["api-keys"].length) return fail("同一个 key 填了两次");
+  const taken = new Set(otherSeats.flatMap(seatKeys));
+  const dup = seat["api-keys"].find((k) => taken.has(k));
+  if (dup) return fail("有 key 已分配给其他席位");
+  if (seat.primary.length === 0) return fail("至少绑定一个账号");
+
+  if (e.expireOn) {
+    if (!e.expireInput) return fail("请选择到期时间，或取消勾选");
+    seat["expire-at"] = (e.expireOrig && e.expireInput === toLocalInput(e.expireOrig)) ? e.expireOrig : fromLocalInput(e.expireInput);
+  } else {
+    delete seat["expire-at"];
+  }
+  for (const field of ["max-concurrency", "rpm"]) {
+    const v = seat[field];
+    if (v === "" || v === undefined || v === null) delete seat[field];
+    else if (!Number.isSafeInteger(Number(v)) || Number(v) < 0) return fail("限额必须是非负整数");
+    else seat[field] = Number(v);
+  }
+
+  if (e.idx >= 0) list[e.idx] = seat;
+  else list.push(seat);
+  S.draft.users = list;
+  S.edit = null;
+  document.getElementById("seatDialog").close();
+  renderMain();
+}
+
+// ---- Saving -------------------------------------------------------------
+
+async function getAPIKeys() {
+  const r = await mgmt("GET", KEYS_PATH);
+  if (r.res.status === 404) return [];
+  if (!r.res.ok || !Array.isArray(r.data)) throw new Error("读取 access.api-keys 失败：" + errText(r));
+  return r.data.map((k) => String(k).trim()).filter(Boolean);
+}
+
+function canonicalJSON(value) {
+  if (Array.isArray(value)) return "[" + value.map(canonicalJSON).join(",") + "]";
+  if (value && typeof value === "object") return "{" + Object.keys(value).sort().map((k) => JSON.stringify(k) + ":" + canonicalJSON(value[k])).join(",") + "}";
+  return JSON.stringify(value);
+}
+
+async function waitForReload(check, message) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(message + "。请等待 CPA 重载后重试保存。");
+}
+
+async function waitForRevocation(keys) {
+  for (const key of keys) {
+    await waitForReload(async () => {
+      const res = await fetch(gatewayRoot + "/v1/models", {
+        cache: "no-store", headers: { "Authorization": "Bearer " + key }, signal: AbortSignal.timeout(10000)
+      });
+      return res.status === 401;
+    }, "尚未确认旧 key 已撤销，未修改席位绑定");
+  }
+}
+
+function setSaveMsg(msg) { document.getElementById("saveMsg").textContent = msg; }
+
+// save applies the draft in an order where every intermediate state is safe:
+// keys leaving carpool are revoked first (so they cannot fall through to the whole
+// pool), then the seats are saved, and only then are new keys allowed in.
+async function save() {
+  if (S.saving || S.loading || !S.draft) return;
+  const draft = clone(S.draft);
+  S.saveError = "";
+  S.saving = true;
+  renderSaveBar();
+  try {
+    setSaveMsg("正在校验配置…");
+    if (draft.enabled === false) throw new Error("请在 CPA 的插件管理中停用插件；停用前先删除席位并保存，以撤销买家 key。");
+    for (const field of ["max-concurrency", "rpm"]) {
+      if (draft[field] !== undefined && (!Number.isSafeInteger(draft[field]) || draft[field] < 0)) {
+        throw new Error("默认限额必须是非负整数，0 表示不限。");
+      }
+    }
+    const latest = await mgmt("GET", CFG_PATH);
+    if (!(latest.res.status === 404 && !S.configExists) &&
+        (!latest.res.ok || canonicalJSON(latest.data) !== canonicalJSON(S.original))) {
+      throw new Error("插件配置已被其他页面修改，或读取失败。请刷新页面后重新编辑。");
+    }
+    const v = await mgmt("POST", API + "/validate", draft);
+    if (!v.res.ok || !v.data) throw new Error("校验请求失败：" + errText(v));
+    if (!v.data.valid) throw new Error("配置校验失败，未保存任何内容：" + v.data.error);
+    if (!v.data.config_revision) throw new Error("插件未返回配置版本，请重新加载更新后的插件。");
+
+    const oldKeys = allKeys(S.original);
+    const newKeys = [...new Set(allKeys(draft))];
+    const removed = oldKeys.filter((k) => !newKeys.includes(k));
+
+    let current = await getAPIKeys();
+    const added = newKeys.filter((k) => !current.includes(k));
+    const retained = current.filter((k) => !removed.includes(k));
+    if (removed.length > 0 && retained.length === 0) {
+      throw new Error("撤销这些 key 会清空 access.api-keys 并关闭 CPA 认证。请先在 CPA 中添加一个独立的车主客户端 key，再重试保存。");
+    }
+    if (added.length > 0 && current.length === 0 &&
+        !confirm("access.api-keys 目前是空的。加入席位 key 后，CPA 会要求所有客户端都携带 key 才能访问。确定继续吗？")) {
+      throw new Error("已取消保存");
+    }
+
+    if (removed.some((k) => current.includes(k))) {
+      setSaveMsg("正在从 access.api-keys 撤销 " + removed.length + " 个不再使用的 key…");
+      const r = await mgmt("PUT", KEYS_PATH, retained);
+      if (!r.res.ok) throw new Error("撤销 key 失败，未保存任何内容：" + errText(r));
+    }
+    // A successful config write only queues an asynchronous host reload.
+    // Never remove a binding until the old keys really fail authentication.
+    await waitForRevocation(removed);
+
+    setSaveMsg("正在保存席位配置…");
+    const r = await mgmt("PUT", CFG_PATH, draft);
+    if (!r.res.ok) throw new Error("保存席位配置失败：" + errText(r) + (removed.length ? "（已撤销的 key 不会恢复，请重试保存）" : ""));
+    S.configExists = true;
+    S.original = clone(draft);
+    setSaveMsg("正在等待席位绑定生效…");
+    await waitForReload(async () => {
+      const ov = await mgmt("GET", API + "/overview");
+      return ov.res.ok && ov.data && !ov.data.config_error && ov.data.config_revision === v.data.config_revision;
+    }, "尚未确认席位绑定生效，未授权新 key");
+
+    current = await getAPIKeys();
+    const missing = newKeys.filter((k) => !current.includes(k));
+    if (missing.length > 0) {
+      setSaveMsg("正在把 " + missing.length + " 个新 key 加入 access.api-keys…");
+      const r2 = await mgmt("PUT", KEYS_PATH, current.concat(missing));
+      if (!r2.res.ok) throw new Error("席位已保存，但新 key 未能加入 access.api-keys：" + errText(r2) + "。请重试保存。");
+    }
+
+    S.apiKeys = current.concat(missing);
+    if (!await loadAll(true)) throw new Error("配置已保存，但刷新管理页失败，请重新连接核对状态。");
+    toast("已保存，席位绑定已生效");
+  } catch (e) {
+    // Re-read access.api-keys so the warnings reflect what was actually changed.
+    try { S.apiKeys = await getAPIKeys(); } catch (e2) {}
+    S.saveError = e.message;
+    toast(e.message, 5000);
+  } finally {
+    S.saving = false;
+    if (S.key && S.draft) renderMain(); else renderSaveBar();
+  }
+}
+
+// ---- Events -------------------------------------------------------------
+
+document.addEventListener("submit", (ev) => {
+  if (ev.target.id !== "loginForm") return;
+  ev.preventDefault();
+  if (S.saving || S.loading) return;
+  const k = document.getElementById("mgmtKey").value.trim();
+  if (!k) return;
+  S.key = k;
+  storageSet(k);
+  loadAll();
+});
+
+document.getElementById("logoutBtn").addEventListener("click", () => {
+  if (S.saving || S.loading) return;
+  if (S.draft && dirty() && !confirm("有未保存的更改，确定退出吗？")) return;
+  storageSet("");
+  Object.assign(S, { key: "", original: null, draft: null, overview: null, auths: [], saveError: "" });
+  renderLogin("");
+});
+document.getElementById("refreshBtn").addEventListener("click", () => {
+  if (S.saving || S.loading) return;
+  if (S.draft && dirty() && !confirm("刷新会放弃未保存的更改，确定吗？")) return;
+  loadAll();
+});
+document.getElementById("saveBtn").addEventListener("click", save);
+document.getElementById("discardBtn").addEventListener("click", () => {
+  if (S.saving || S.loading) return;
+  if (!confirm("放弃所有未保存的更改？")) return;
+  S.draft = clone(S.original);
+  renderMain();
+});
+
+document.getElementById("app").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-act]");
+  if (!btn || S.saving || S.loading) return;
+  const idx = Number(btn.dataset.idx);
+  const list = users(S.draft);
+  switch (btn.dataset.act) {
+    case "add": openEditor(-1); break;
+    case "edit": openEditor(idx); break;
+    case "portal": copyText(portalLink(seatKeys(list[idx])[0])); break;
+    case "delete":
+      if (confirm("删除席位「" + seatDisplayName(list[idx], idx) + "」？保存后它的 key 会从 access.api-keys 中撤销，立即失效。")) {
+        list.splice(idx, 1);
+        renderMain();
+      }
+      break;
+  }
+});
+
+function onSettingInput(ev) {
+  const el = ev.target;
+  const name = el.dataset && el.dataset.setting;
+  if (!name || S.saving || S.loading) return;
+  if (el.type === "checkbox") {
+    S.draft[name] = el.checked;
+    if (name === "enabled") { renderMain(); return; }
+  } else if (el.type === "number") {
+    const n = Number(el.value);
+    S.draft[name] = Number.isSafeInteger(n) && n >= 0 ? n : el.value;
+  } else {
+    const v = el.value.trim();
+    if (v === "" && !(name in S.original)) delete S.draft[name];
+    else S.draft[name] = v;
+  }
+  renderSaveBar();
+}
+document.getElementById("app").addEventListener("input", onSettingInput);
+document.getElementById("app").addEventListener("change", onSettingInput);
+
+const dlg = document.getElementById("seatDialog");
+dlg.addEventListener("input", (ev) => {
+  const e = S.edit;
+  if (!e) return;
+  const el = ev.target;
+  switch (el.dataset.ed) {
+    case "name": e.seat.name = el.value; break;
+    case "key": e.seat["api-keys"][Number(el.dataset.i)] = el.value; break;
+    case "expire": e.expireInput = el.value; break;
+    case "max-concurrency": case "rpm": e.seat[el.dataset.ed] = el.value; break;
+  }
+});
+dlg.addEventListener("change", (ev) => {
+  const e = S.edit;
+  if (e && ev.target.dataset.ed === "expire-on") {
+    e.expireOn = ev.target.checked;
+    renderEditor();
+  }
+});
+dlg.addEventListener("click", (ev) => {
+  const e = S.edit;
+  const btn = ev.target.closest("[data-ed-act]");
+  if (!e || !btn) return;
+  const i = Number(btn.dataset.i);
+  const keys = e.seat["api-keys"];
+  switch (btn.dataset.edAct) {
+    case "gen-key": keys.push(generateKey()); break;
+    case "add-key": keys.push(""); break;
+    case "del-key": keys.splice(i, 1); break;
+    case "copy-key": if (keys[i]) copyText(keys[i]); return;
+    case "copy-portal": if (String(keys[i] || "").trim()) copyText(portalLink(String(keys[i]).trim())); return;
+    case "del-primary": e.seat.primary.splice(i, 1); break;
+    case "pick-auth": {
+      const v = document.getElementById("authPick").value;
+      if (v) e.seat.primary.push(v);
+      break;
+    }
+    case "add-primary": {
+      const v = document.getElementById("authManual").value.trim();
+      if (v && !e.seat.primary.some((p) => normId(p) === normId(v))) e.seat.primary.push(v);
+      break;
+    }
+    case "cancel": S.edit = null; dlg.close(); return;
+    case "ok": finishEditor(); return;
+  }
+  e.error = "";
+  renderEditor();
+});
+dlg.addEventListener("cancel", () => { S.edit = null; });
+
+window.addEventListener("beforeunload", (ev) => {
+  if (S.draft && dirty()) { ev.preventDefault(); ev.returnValue = ""; }
+});
+
+setInterval(refreshOverview, 20000);
+
+if (S.key) loadAll(); else renderLogin("");
+</script>
+</body>
+</html>

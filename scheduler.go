@@ -14,15 +14,22 @@ import (
 
 type routingTable struct {
 	debug bool
+	// Keep management settings and routing in one immutable, atomic snapshot.
+	config PluginConfig
+	// configRevision identifies the configuration actually used for routing.
+	configRevision string
 	// configErr is set when the configuration could not be loaded. The table then
 	// rejects every request: buyers cannot be told apart from other callers, and
 	// letting them through would expose the whole account pool.
 	configErr error
 	// publicBaseURL is the normalized public-base-url, without a trailing slash.
 	publicBaseURL string
-	seats         []*seat // in configuration order
-	byKey         map[string]*seat
-	byScope       map[string]*seat
+	// limited is true when any seat has a concurrency or RPM limit. Only then does
+	// the plugin register its request hooks, which see every request's body.
+	limited bool
+	seats   []*seat // in configuration order
+	byKey   map[string]*seat
+	byScope map[string]*seat
 }
 
 // seat is one compiled buyer entry.
@@ -33,6 +40,7 @@ type seat struct {
 	authIDs []string
 	// matchIDs are the normalized Auth IDs, used to match scheduler candidates.
 	matchIDs []string
+	apiKeys  []string  // trimmed, non-empty
 	expireAt time.Time // zero when the seat never expires
 	// maxConcurrency and rpm are the effective limits; 0 means unlimited.
 	maxConcurrency int
@@ -86,6 +94,9 @@ func compileRouting(cfg PluginConfig) (*routingTable, error) {
 		if s.maxConcurrency < 0 || s.rpm < 0 {
 			return nil, fmt.Errorf("users[%d] (%s): max-concurrency and rpm must not be negative (0 means unlimited)", i, user.Name)
 		}
+		if s.maxConcurrency > 0 || s.rpm > 0 {
+			table.limited = true
+		}
 
 		for _, a := range user.Primary {
 			a = strings.TrimSpace(a)
@@ -106,7 +117,6 @@ func compileRouting(cfg PluginConfig) (*routingTable, error) {
 			s.expireAt = t
 		}
 
-		keys := 0
 		for _, k := range user.APIKeys {
 			k = strings.TrimSpace(k)
 			if k == "" {
@@ -117,9 +127,9 @@ func compileRouting(cfg PluginConfig) (*routingTable, error) {
 			}
 			table.byKey[k] = s
 			table.byScope[callerScope(k)] = s
-			keys++
+			s.apiKeys = append(s.apiKeys, k)
 		}
-		if keys == 0 {
+		if len(s.apiKeys) == 0 {
 			return nil, fmt.Errorf("users[%d] (%s): api-keys must list at least one key", i, user.Name)
 		}
 		table.seats = append(table.seats, s)

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync/atomic"
@@ -11,10 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var (
-	activeConfig atomic.Pointer[PluginConfig]
-	activeTable  atomic.Pointer[routingTable]
-)
+var activeTable atomic.Pointer[routingTable]
 
 type registrationPayload struct {
 	SchemaVersion uint32                 `json:"schema_version"`
@@ -39,7 +38,9 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 	switch method {
 	case pluginabi.MethodPluginRegister, pluginabi.MethodPluginReconfigure:
 		configure(request)
-		return okEnvelope(pluginRegistration())
+		// CPA takes the capabilities from every reconfigure, so the request hooks
+		// come and go with the limits.
+		return okEnvelope(pluginRegistration(activeTable.Load()))
 
 	case pluginabi.MethodSchedulerPick:
 		return pickAuth(request, activeTable.Load())
@@ -55,13 +56,20 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 
 	case pluginabi.MethodManagementRegister:
 		// CPA serves plugin resources for GET only, and only on the exact paths
-		// registered here, so every portal endpoint must be listed.
+		// registered here, so every portal endpoint must be listed. Management
+		// routes must not carry a Menu: CPA would turn a GET one into a resource.
 		return okEnvelope(pluginapi.ManagementRegistrationResponse{
+			Routes: adminRoutes,
 			Resources: []pluginapi.ResourceRoute{
 				{
 					Path:        RoutePortal,
 					Menu:        "拼车管家",
-					Description: "轻量级席位拼车、买家自助用量查询与一键满血重置",
+					Description: "买家自助页面：额度与刷新倒计时、重置卡核销、客户端接入配置",
+				},
+				{
+					Path:        RouteAdmin,
+					Menu:        "拼车管家 · 管理",
+					Description: "车主管理页面：席位增删改、key 生成、限额与用量（需要管理密钥）",
 				},
 				{
 					Path:        RouteAPIStatus,
@@ -75,12 +83,12 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 		})
 
 	case pluginabi.MethodManagementHandle:
-		cfg := activeConfig.Load()
+		table := activeTable.Load()
 		effectiveCfg := PluginConfig{}
-		if cfg != nil {
-			effectiveCfg = *cfg
+		if table != nil {
+			effectiveCfg = table.config
 		}
-		return handleResource(request, activeTable.Load(), effectiveCfg)
+		return handleManagement(request, table, effectiveCfg)
 
 	default:
 		return errorEnvelope("unknown_method", "unknown method: "+method), nil
@@ -92,13 +100,16 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 // and buyer keys would then reach every account through CPA's built-in scheduler.
 // An invalid configuration instead installs a table that rejects all requests.
 func configure(raw []byte) {
-	cfg, table, err := loadConfig(raw)
+	_, table, err := loadConfig(raw)
 	if err != nil {
 		logf("error", "invalid plugin configuration, rejecting all requests until it is fixed: %v", err)
-		cfg = PluginConfig{}
 		table = &routingTable{configErr: err}
 	}
-	activeConfig.Store(&cfg)
+	// Without limits the request hooks are unregistered and completions stop
+	// arriving, so drop the counters rather than keep slots that are never freed.
+	if prev := activeTable.Load(); prev != nil && prev.limited && !table.limited {
+		limiter.reset()
+	}
 	activeTable.Store(table)
 }
 
@@ -132,6 +143,15 @@ func parseConfig(configYAML []byte) (PluginConfig, *routingTable, error) {
 	if err != nil {
 		return PluginConfig{}, nil, err
 	}
+	// Use parsed values, since CPA may reformat YAML and inject host-owned fields.
+	// The digest is only returned on authenticated management routes.
+	canonical, err := json.Marshal(cfg)
+	if err != nil {
+		return PluginConfig{}, nil, fmt.Errorf("encode config revision: %w", err)
+	}
+	digest := sha256.Sum256(canonical)
+	table.configRevision = hex.EncodeToString(digest[:])
+	table.config = cfg
 	return cfg, table, nil
 }
 
@@ -145,7 +165,11 @@ func noteHostSchema(version uint32) {
 	legacyHost.Store(legacy)
 }
 
-func pluginRegistration() registrationPayload {
+// pluginRegistration describes the plugin for the configuration in table. The
+// request hooks see every request, the owner's too, so they are only registered
+// while some seat has a limit.
+func pluginRegistration(table *routingTable) registrationPayload {
+	limited := table != nil && table.limited
 	return registrationPayload{
 		SchemaVersion: PluginSchemaVersion,
 		Metadata: pluginapi.Metadata{
@@ -153,15 +177,28 @@ func pluginRegistration() registrationPayload {
 			Version:          PluginVersion,
 			Author:           "212duo",
 			GitHubRepository: "https://github.com/212duo/cpa-plugin-carpool",
+			Logo:             PluginLogoURL,
+			ConfigFields:     configFields,
 		},
 		Capabilities: registrationCapability{
 			Scheduler:                 true,
 			SchedulerAcrossPriorities: true,
-			RequestInterceptor:        true,
-			RequestLifecyclePlugin:    true,
+			RequestInterceptor:        limited,
+			RequestLifecyclePlugin:    limited,
 			ManagementAPI:             true,
 		},
 	}
+}
+
+// configFields describes plugins.configs.<plugin-id> for CPA's management clients.
+var configFields = []pluginapi.ConfigField{
+	{Name: "users", Type: pluginapi.ConfigFieldTypeArray, Description: "Seats: name, api-keys, primary, expire-at, max-concurrency, rpm. Easiest to edit on the plugin's admin page. / 席位列表，建议在插件的管理页面编辑"},
+	{Name: "max-concurrency", Type: pluginapi.ConfigFieldTypeInteger, Default: 0, Description: "Default concurrent requests per seat, 0 = unlimited / 席位默认并发上限，0 为不限"},
+	{Name: "rpm", Type: pluginapi.ConfigFieldTypeInteger, Default: 0, Description: "Default requests per minute per seat, 0 = unlimited / 席位默认每分钟请求上限，0 为不限"},
+	{Name: "public-base-url", Type: pluginapi.ConfigFieldTypeString, Default: "", Description: "Gateway address shown in the portal's client setup guide / Portal 接入引导中显示的网关地址"},
+	{Name: "debug", Type: pluginapi.ConfigFieldTypeBoolean, Default: false, Description: "Log every scheduling decision (seat names only) / 记录每次调度决定（只记录席位名）"},
+	{Name: "db-path", Type: pluginapi.ConfigFieldTypeString, Default: "", Description: "CPA Manager Plus usage.sqlite, auto-detected when empty / CPA Manager Plus 用量数据库，留空自动探测"},
+	{Name: "upstream-user-agent", Type: pluginapi.ConfigFieldTypeString, Default: "", Description: "User-Agent for ChatGPT quota requests / 查询 ChatGPT 额度时使用的 User-Agent"},
 }
 
 func okEnvelope(result any) ([]byte, error) {
