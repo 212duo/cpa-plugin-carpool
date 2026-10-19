@@ -12,7 +12,7 @@
 
 [简体中文](./README.md) · **English**
 
-The current release is [v0.5.0](https://github.com/212duo/cpa-plugin-carpool/releases/tag/v0.5.0), including owner administration, request monitoring and wider layouts.
+The current release is [v0.6.0](https://github.com/212duo/cpa-plugin-carpool/releases/tag/v0.6.0), with backend save jobs, seat pause and bulk renewal, deployment diagnostics and configuration safety behind reverse proxies.
 
 [Quick start](#-quick-start) · [Configuration](#-configuration-reference) · [Security](#-security-design) · [Known limitations](#-known-limitations) · [Spec (SPEC.md, Chinese)](./SPEC.md) · [Changelog](./CHANGELOG.md)
 
@@ -73,7 +73,7 @@ This plugin runs inside CPA as a native shared library, with no database and no 
 
 * **Scheduling**: the plugin registers as CPA's scheduler plugin. For each request it identifies the caller's key (CPA's `caller_scope`, or the `Authorization` / `x-api-key` header), finds the seat and picks only among the accounts bound to it. Keys that are not configured (such as your own) are handed back to CPA's default scheduler.
 * **Limits**: as soon as any seat has a limit, the plugin also registers as a request interceptor. Every request passes its seat's limits before an account is picked and gets a 429 if it is over them; CPA tells the plugin when each request ends, which frees its concurrency slot.
-* **Portal and admin page**: pages served through CPA's plugin resource routes. Buyer endpoints take the buyer's key; admin endpoints live under CPA's Management API and need the management key. Credentials and runtime cooldown state are read through CPA host callbacks, so the plugin never reads or writes the auth directory itself; the admin page saves through CPA's own config API, which writes `config.yaml`.
+* **Portal and admin page**: pages served through CPA's plugin resource routes. Buyer endpoints take the buyer's key; admin endpoints live under CPA's Management API and need the management key. Credentials and runtime cooldown state are read through CPA host callbacks, so the plugin never reads or writes the auth directory itself; the admin page saves through the plugin backend, which calls CPA's config API to write `config.yaml`.
 
 ## 📋 Compatibility
 
@@ -173,6 +173,7 @@ The config lives under `plugins.configs.cpa-carpool`. Parsing is **strict**: a m
 | `public-base-url` | string | The address clients use to reach the gateway (e.g. `https://api.example.com`), shown in the portal's setup guide; empty uses the address the portal was opened on |
 | `max-concurrency` | int | Default concurrent request limit for seats that don't set one; `0` (default) means unlimited |
 | `rpm` | int | Default requests-per-minute limit for seats that don't set one; `0` (default) means unlimited |
+| `users[].paused` | bool | Pause the seat while retaining its keys and bindings; requests are explicitly rejected. Default `false` |
 | `users[].name` | string | Seat name shown in the portal, **must be unique**; defaults to `seat-N` |
 | `users[].api-keys` | []string | Keys assigned to the seat, **at least one**; a key may not appear in two seats |
 | `users[].primary` | []string | Bound CPA auth IDs, **at least one**; exact match (case and `.json` suffix ignored) |
@@ -240,7 +241,7 @@ When several people share one account, you can cap each seat's concurrent reques
 * A request over the limit is rejected before any account is picked, with HTTP 429, a `Retry-After` header and a `rate_limit_error`; clients such as Codex CLI and Claude Code back off and retry.
 * RPM is a sliding 60-second window counted by request start; a concurrency slot is freed when CPA reports the request's end (success, failure or cancellation). If that report is ever lost, the slot is reclaimed after 30 minutes at most.
 * Counters live in CPA's process memory: they reset when CPA restarts and are not shared between CPA instances.
-* The request interception and completion hooks are only registered while at least one seat has a limit, so without limits no request pays any overhead. Usage is only counted then too, and is shown in the buyer portal and on the admin page.
+* Request interception and completion hooks are registered while at least one seat has a limit or is paused. With neither limits nor paused seats there is no request-hook overhead. Current limit usage is counted only while hooks are active.
 
 ## 🔑 Admin page
 
@@ -257,13 +258,21 @@ Enter the plain-text management key on the page to:
 * set leases, seat limits and their defaults, `public-base-url` and debug logging;
 * see each seat's account load and cooldown state, current concurrency, requests in the last minute and historical usage.
 
-The page itself contains no data; everything is read with the management key, which is kept only in this browser tab (`sessionStorage`). On "save", the page first has the plugin validate the new config with its strict rules, then uses CPA's `/v8/management/config` API to:
+The page itself contains no data; everything is read with the management key, which is kept only in this browser tab (`sessionStorage`). Configuration and client keys use the plugin's `/v0/management/carpool/config` and `/v0/management/carpool/api-keys` endpoints; the browser does not need access to `/v8/`. On "save", the page previews seat additions, deletions and revoked-key counts, then submits one job to `POST /v0/management/carpool/save`. The Go backend validates the configuration and its persisted revision, then calls CPA's configuration API to:
 
 1. revoke the keys of deleted seats from `access.api-keys` (first, so they can never fall through to the default scheduler and the whole pool);
 2. confirm those keys fail CPA authentication, then write `plugins.configs.cpa-carpool`;
 3. confirm the plugin has applied the new bindings, then add new keys to `access.api-keys`.
 
-If a step fails the page stops and says so; no completed step ever gives a key more access than it should have. CPA writes `config.yaml` and reloads it, and the plugin picks up the change.
+A failed step reports its stage and offers a retry when safe; revoked keys are never automatically restored. The browser polls `GET /v0/management/carpool/save` for progress. Jobs continue after a tab closes or the network disconnects, and reconnecting discovers the latest job. The newest 32 jobs are kept in memory, with a two-minute limit per attempt; a CPA restart clears job history, so reload and check persisted configuration afterward.
+
+Filter seats by active, expiring within seven days, expired or paused. Renew one seat or selected seats: active leases extend from their expiry, while expired or unset leases start from now. Converting a permanent seat into a limited lease requires confirmation. Pausing retains the original keys and bindings and rejects routing, Portal and monitoring access; resuming does not extend an expired lease. Changes take effect after saving.
+
+Deployment diagnostics checks direct CPA configuration connectivity, whether persisted settings are active, client authentication and usage database readability. It does not return keys, credentials or raw database errors.
+
+If configuration or client keys cannot be read, the page shows a red error and locks editing and saving. Fix the connection and click Refresh to reload. Failed reads never become empty seat lists; first-time setup is allowed only after the backend successfully reads the host configuration and confirms the plugin section is absent.
+
+The backend connects directly to CPA at `http://127.0.0.1:8317`, bypassing system proxies and the public reverse proxy. For a custom port, listen address or native TLS, set `CARPOOL_HOST_URL` in the **CPA process or container**, for example `http://127.0.0.1:18317` or `https://localhost:8317` (with a system-trusted certificate). Use only a scheme, host and port. The public reverse proxy only needs to forward `/v0/management/`; pages also allow embedding in a same-origin CPAMP iframe.
 
 Keep an owner client key outside the seats in `access.api-keys`. The admin page refuses to revoke the last key, because an empty list disables CPA client authentication. To disable the plugin, delete the seats and save first, then disable it through CPA's plugin manager.
 
@@ -318,7 +327,7 @@ The portal does not need CPA's management key; access control rests entirely on 
 * Token history depends on CPA Manager Plus collecting events and sharing its database with CPA. Missing or unreadable data is shown as unavailable, rather than zero usage.
 * Limit counters live in CPA's process memory: they reset on restart and are not shared between CPA instances. RPM counts every API call that passes CPA's request interception (including Claude Code's `count_tokens` and the like).
 * The concurrency limit relies on CPA reporting request completion (plugin schema 2 or later, which CPA v8.0.30 has); on a host without it the plugin logs a warning and only enforces RPM.
-* The admin page reads and writes the config through CPA v8's `/v8/management/config` API, and CPA writes `config.yaml` back in the v8 layout when it saves. It checks for configuration changes before saving, but another writer can still race with the write itself; avoid editing in multiple places at once.
+* The plugin backend reads and writes configuration through CPA v8's configuration API, and CPA writes `config.yaml` back in the v8 layout when it saves. The browser only uses `/v0/management/carpool/` endpoints. Backend jobs reject stale persisted revisions and serialize plugin-owned writes. Writes from other CPA management tools are not part of an atomic transaction; avoid editing in multiple places at once.
 * Prebuilt releases and the plugin store cover Linux amd64 / arm64 only.
 
 ## 🔨 Development
@@ -359,6 +368,7 @@ Please read [CONTRIBUTING.md](./CONTRIBUTING.md) (Chinese) before contributing. 
 - [x] **v0.1.0**: standalone prototype (Python + Caddy) validating the countdowns, one-click reset and field masking
 - [x] **v0.2.0**: native CPA v8 plugin; exact binding, lease expiry, fail-closed config; cooldown cleared through host callbacks
 - [x] **v0.3.0**: per-seat concurrency / RPM limits (shared by the seat's keys); client setup guides in the portal (Codex CLI, Claude Code, Cursor, OpenAI-compatible)
+- [x] **v0.6.0**: backend save jobs and retries, revision checks, failed-read protection, seat pause and bulk renewal, deployment diagnostics, same-origin iframe and reverse-proxy compatibility
 - [x] **v0.5.0**: private per-key request monitoring and wider Portal / admin layouts
 - [x] **v0.4 development milestone (included in v0.5.0)**: owner admin page (seat management, key generation, account binding, limits and usage); plugin store release assets and registry entry
 

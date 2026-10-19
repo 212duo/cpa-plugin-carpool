@@ -191,12 +191,23 @@ plugins:
 | `GET /v0/management/carpool/overview` | 插件 | 插件版本、已生效配置的 `config_revision` 摘要、启用状态、配置错误、是否旧宿主、是否找到用量库；每个席位的名称、key 数量（不返回 key）、`primary`、到期、限额用量、已加载账号（ID、类型、状态、冷却）、按 key 汇总的历史用量 |
 | `GET /v0/management/carpool/auths` | 插件 | `host.auth.list` 的账号（ID、类型、label、email、状态）及已绑定的席位名，不含凭据 |
 | `POST /v0/management/carpool/validate` | 插件 | 请求体为插件配置 JSON；转成 YAML 后按 3.8 的规则校验，返回 `{"valid":true,"seats":N,"config_revision":"..."}` 或 `{"valid":false,"error":"..."}`，不影响正在使用的配置 |
-| `GET/PUT /v8/management/config/plugins/configs/<插件ID>` | CPA | 读取 / 替换插件配置段 |
-| `GET/PUT /v8/management/config/access/api-keys` | CPA | 读取 / 写入客户端 key 列表 |
+| `GET/POST /v0/management/carpool/save` | 插件 | GET 查询最新任务或指定 `id`；POST 提交 `{request_id,expected_revision,config,allow_enable_auth}`，返回 `{job:{id,state,stage,message,error_code,retryable,config_saved,updated_at}}`，不返回草稿或 key |
+| `POST /v0/management/carpool/save/retry` | 插件 | 请求 `{request_id}`，重试同一任务，仅允许可恢复的失败；保留原配置与 key 差异 |
+| `GET /v0/management/carpool/diagnostics` | 插件 | 配置接口、配置生效、客户端认证、历史用量的状态与处理提示，不返回敏感信息 |
+| `GET/PUT /v0/management/carpool/config` | 插件 | GET 返回 `{"config":{...},"exists":true,"revision":"..."}`；PUT 校验并替换插件配置段。配置段确实不存在时由后端明确返回 `exists:false` 与初始化配置 |
+| `GET/PUT /v0/management/carpool/api-keys` | 插件 | 读取 / 写入客户端 key 列表；PUT 拒绝空列表，防止关闭 CPA 客户端认证 |
 
 管理路由不带 `Menu`（CPA 会把带 `Menu` 的 GET 管理路由当作免鉴权资源）。
 
-**保存流程**：检查持久化配置是否仍与编辑时一致 → 校验并取得 `config_revision` → 撤销旧配置中有、新配置中没有的 key → 轮询 `/v1/models`，确认被撤销的 key 返回 401 → `PUT` 插件配置段 → 轮询概览，确认已生效的 `config_revision` 与校验结果一致 → 加入新配置中尚未在 `access.api-keys` 里的 key。轮询最多 40 次、间隔 250ms，每次请求超时为 10 秒。任一步失败即停止并保留重试入口；已保存的配置成为下一次重试的基线。保存期间禁用编辑、刷新与退出。原认证列表为空时，加入 key 前要求确认；撤销 key 会清空列表时拒绝保存，提示先添加独立的车主 key。管理页不提供直接停用插件的操作，应先撤销席位再从 CPA 停用。配置检查不能代替服务端事务，应避免多处同时编辑。
+浏览器只访问插件的 `/v0/management/carpool/` 接口。SDK v8.0.30 没有配置回调，Go 后端直接向 CPA 的 `/v8/management/config` 发起服务端请求，默认 `http://127.0.0.1:8317`；CPA 进程环境变量 `CARPOOL_HOST_URL` 可指定自定义监听地址、端口或 HTTPS（证书须受信任），不接受路径、用户信息、查询参数或片段。目标不取自浏览器请求；不使用系统代理、不跟随重定向，仅传递管理认证头，请求超时 8 秒、响应最多 8 MiB。插件 ID 来自宿主管理注册时的 `ResourceBasePath`。
+
+后端先读取完整持久化配置，再从成功的 JSON 对象中检查插件配置段 / key 列表是否存在，避免把任何 404 当成缺省值；PUT 也必须先成功读取当前配置。宿主不可达、非成功响应、异常 JSON 或结构返回 503，写入失败返回 502。前端只有成功读取配置与 key 列表后才开放编辑和保存；读取失败显示红色「无法读取配置接口，请检查网络或反代」，清除编辑基线与草稿、关闭编辑框并锁定保存，手动刷新成功后解除。保存前重新读取失败同样锁定，不发起后续写入。
+
+**保存流程**：前端确认变更预览并提交一次任务，Go 后端检查持久化版本 → 校验 → 撤销旧 key → 通过本机 `/v1/models` 确认旧 key 返回 401 → 再次检查配置与 key → 保存插件配置 → 通过当前运行表确认路由摘要 → 再次检查持久化配置 → 合并加入新 key → 确认新 key 认证返回 200。前端不再执行撤销或写入配置的步骤。
+
+同一 `request_id` 与相同请求返回现有任务，不重复执行；同 ID 不同请求返回 409。每次重试保留最初的旧 key 集合，并识别任务自己已完成的配置写入。只保留最近 32 笔任务（包含草稿 key，但不保存管理密钥），仅在内存中，重启后清除。每次尝试总超时 2 分钟，单个生效检查最多 40 次 / 250ms，宿主 HTTP 请求最多 8 秒。任务不依赖浏览器连接，也不会把管理密钥或草稿写入任务状态响应。插件内配置与 key 的 PUT 和后台任务共用互斥锁，忙时返回 409；其他宿主管理入口仍存在检查与写入之间的竞争，不承诺跨入口原子事务。
+
+`users[].paused` 默认 false。暂停仍编译 key、scope 和账号绑定，并注册请求拦截；请求拦截返回 403 `seat_paused`，调度拒绝，Portal / 核销 / 监控拒绝。恢复不修改到期时间。管理页续期从 `max(当前时间,原到期时间)` 延长 1..3650 天；永久席位转限期需确认。批量续期只影响勾选席位。
 
 前端校验：席位名非空且不重复、至少一个 key 且不与其他席位重复、至少一个账号、到期时间按浏览器时区转为 RFC3339（未修改时保留原字符串）、限额为非负整数。随机 key 由 `crypto.getRandomValues` 生成：`sk-carpool-` + 24 字节十六进制。
 
@@ -228,3 +239,8 @@ plugins:
 | **Phase 4** | 限频与接入引导 | 席位并发 / RPM 限制、客户端配置模板 | 已完成 ✅（v0.3.0） |
 | **Phase 5** | 管理界面与插件商店 | 席位管理页面、管理接口、商店发布物与 registry 条目 | 已完成，随 v0.5.0 发布；商店收录需单独提交 |
 | **Phase 6** | 请求监控与宽屏页面 | 当前 Key 隔离、请求记录与模型汇总、响应式布局 | 已完成（v0.5.0） |
+
+
+### 0.6 补充
+
+后端保存任务、席位暂停与续期、部署诊断已实现。配置读取失败时管理页保持锁定，允许手动刷新和诊断。真实宿主与反代联调范围见本版本 Release 的测试说明。

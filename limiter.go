@@ -199,6 +199,10 @@ func interceptBeforeAuth(raw []byte, table *routingTable) ([]byte, error) {
 	if s == nil {
 		return passThrough()
 	}
+	if s.user.Paused {
+		body, _ := json.Marshal(map[string]any{"type": "error", "error": map[string]string{"type": "permission_error", "code": "seat_paused", "message": "Seat paused, please contact the host"}})
+		return okEnvelope(pluginapi.RequestInterceptResponse{Terminate: true, StatusCode: http.StatusForbidden, ResponseHeaders: http.Header{"Content-Type": {"application/json"}}, ResponseBody: body})
+	}
 
 	track := req.RequestID != "" && !legacyHost.Load()
 	d := limiter.acquire(req.RequestID, s, track, time.Now())

@@ -25,7 +25,7 @@ type routingTable struct {
 	configErr error
 	// publicBaseURL is the normalized public-base-url, without a trailing slash.
 	publicBaseURL string
-	// limited is true when any seat has a concurrency or RPM limit. Only then does
+	// limited is true when any seat has a limit or is paused. Only then does
 	// the plugin register its request hooks, which see every request's body.
 	limited bool
 	seats   []*seat // in configuration order
@@ -95,7 +95,7 @@ func compileRouting(cfg PluginConfig) (*routingTable, error) {
 		if s.maxConcurrency < 0 || s.rpm < 0 {
 			return nil, fmt.Errorf("users[%d] (%s): max-concurrency and rpm must not be negative (0 means unlimited)", i, user.Name)
 		}
-		if s.maxConcurrency > 0 || s.rpm > 0 {
+		if s.maxConcurrency > 0 || s.rpm > 0 || user.Paused {
 			table.limited = true
 		}
 
@@ -234,6 +234,9 @@ func pickAuth(raw []byte, table *routingTable) ([]byte, error) {
 		return unhandled()
 	}
 
+	if s.user.Paused {
+		return okEnvelope(pluginapi.SchedulerPickResponse{Handled: true, Reject: true, RejectCode: "seat_paused", RejectReason: "carpool: your seat is paused, please contact the host"})
+	}
 	// 1. Check auto-expiry if configured
 	if s.expired(time.Now()) {
 		return okEnvelope(pluginapi.SchedulerPickResponse{

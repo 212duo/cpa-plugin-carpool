@@ -123,6 +123,9 @@ func lookupSeat(table *routingTable, key string) (buyer *seat, status int, messa
 	if buyer == nil {
 		return nil, http.StatusNotFound, "Key not found or unauthorized"
 	}
+	if buyer.user.Paused {
+		return nil, http.StatusForbidden, "Seat paused, please contact the host"
+	}
 	if buyer.expired(time.Now()) {
 		return nil, http.StatusForbidden, "Seat expired at " + buyer.user.ExpireAt + ", please contact the host to renew"
 	}

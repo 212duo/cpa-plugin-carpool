@@ -55,6 +55,9 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 		return completeRequest(request)
 
 	case pluginabi.MethodManagementRegister:
+		if err := noteManagementRegistration(request); err != nil {
+			return nil, err
+		}
 		// CPA serves plugin resources for GET only, and only on the exact paths
 		// registered here, so every portal endpoint must be listed. Management
 		// routes must not carry a Menu: CPA would turn a GET one into a resource.
@@ -107,7 +110,7 @@ func configure(raw []byte) {
 		logf("error", "invalid plugin configuration, rejecting all requests until it is fixed: %v", err)
 		table = &routingTable{configErr: err}
 	}
-	// Without limits the request hooks are unregistered and completions stop
+	// Without limits or paused seats, request hooks are unregistered and completions stop
 	// arriving, so drop the counters rather than keep slots that are never freed.
 	if prev := activeTable.Load(); prev != nil && prev.limited && !table.limited {
 		limiter.reset()
@@ -173,7 +176,7 @@ func noteHostSchema(version uint32) {
 
 // pluginRegistration describes the plugin for the configuration in table. The
 // request hooks see every request, the owner's too, so they are only registered
-// while some seat has a limit.
+// while some seat has a limit or is paused.
 func pluginRegistration(table *routingTable) registrationPayload {
 	limited := table != nil && table.limited
 	return registrationPayload{

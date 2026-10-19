@@ -15,7 +15,12 @@ import (
 
 func adminCall(t *testing.T, method, path string, body []byte) pluginapi.ManagementResponse {
 	t.Helper()
-	raw, err := json.Marshal(pluginapi.ManagementRequest{Method: method, Path: path, Body: body})
+	return adminRequest(t, pluginapi.ManagementRequest{Method: method, Path: path, Body: body})
+}
+
+func adminRequest(t *testing.T, req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
+	t.Helper()
+	raw, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,18 +67,26 @@ func TestManagementRegisterListsAdminRoutes(t *testing.T) {
 		t.Error("admin page is not registered as a resource")
 	}
 
-	routes := map[string]string{}
+	routes := map[string]bool{}
 	for _, r := range reg.Routes {
 		// CPA turns a GET management route with a Menu into an unauthenticated resource.
 		if r.Menu != "" {
 			t.Errorf("management route %s has a menu", r.Path)
 		}
-		routes[r.Path] = r.Method
+		routes[r.Method+" "+r.Path] = true
 	}
-	want := map[string]string{
-		RouteAdminOverview: http.MethodGet,
-		RouteAdminAuths:    http.MethodGet,
-		RouteAdminValidate: http.MethodPost,
+	want := map[string]bool{
+		http.MethodGet + " " + RouteAdminOverview:    true,
+		http.MethodGet + " " + RouteAdminAuths:       true,
+		http.MethodPost + " " + RouteAdminValidate:   true,
+		http.MethodGet + " " + RouteAdminConfig:      true,
+		http.MethodPut + " " + RouteAdminConfig:      true,
+		http.MethodGet + " " + RouteAdminAPIKeys:     true,
+		http.MethodPut + " " + RouteAdminAPIKeys:     true,
+		http.MethodGet + " " + RouteAdminSave:        true,
+		http.MethodPost + " " + RouteAdminSave:       true,
+		http.MethodPost + " " + RouteAdminRetry:      true,
+		http.MethodGet + " " + RouteAdminDiagnostics: true,
 	}
 	if !reflect.DeepEqual(routes, want) {
 		t.Fatalf("management routes = %v, want %v", routes, want)

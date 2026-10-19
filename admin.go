@@ -16,8 +16,8 @@ import (
 // The admin page is a resource, because a browser cannot send the management key
 // when it navigates, so it carries no data at all. Everything it shows comes from
 // the management routes below, which CPA serves only to callers holding the
-// management key, and from CPA's own /v8/management/config API, which is also
-// where the page saves seats and access.api-keys.
+// management key. Configuration reads and writes go through the plugin backend,
+// which talks directly to CPA without depending on the public reverse proxy.
 
 //go:embed admin.html
 var embeddedAdminHTML []byte
@@ -27,18 +27,28 @@ var adminRoutes = []pluginapi.ManagementRoute{
 	{Method: http.MethodGet, Path: RouteAdminOverview, Description: "拼车管家：席位运行状态（账号、限额使用、用量）"},
 	{Method: http.MethodGet, Path: RouteAdminAuths, Description: "拼车管家：可绑定的 CPA 账号"},
 	{Method: http.MethodPost, Path: RouteAdminValidate, Description: "拼车管家：保存前校验插件配置"},
+	{Method: http.MethodGet, Path: RouteAdminConfig, Description: "拼车管家：读取持久化插件配置"},
+	{Method: http.MethodPut, Path: RouteAdminConfig, Description: "拼车管家：保存插件配置"},
+	{Method: http.MethodGet, Path: RouteAdminAPIKeys, Description: "拼车管家：读取客户端 key"},
+	{Method: http.MethodPut, Path: RouteAdminAPIKeys, Description: "拼车管家：保存客户端 key"},
+	{Method: http.MethodGet, Path: RouteAdminSave, Description: "拼车管家：查看后台保存任务"},
+	{Method: http.MethodPost, Path: RouteAdminSave, Description: "拼车管家：提交后台保存任务"},
+	{Method: http.MethodPost, Path: RouteAdminRetry, Description: "拼车管家：重试后台保存任务"},
+	{Method: http.MethodGet, Path: RouteAdminDiagnostics, Description: "拼车管家：部署诊断"},
 }
 
 // handleAdminAPI serves the management routes. CPA has already checked the
 // management key before the request reaches the plugin.
 func handleAdminAPI(req pluginapi.ManagementRequest, table *routingTable, cfg PluginConfig) ([]byte, error) {
 	route := strings.TrimPrefix(req.Path, managementBasePath)
+	matched := false
 	for _, r := range adminRoutes {
 		if r.Path != route {
 			continue
 		}
+		matched = true
 		if req.Method != "" && !strings.EqualFold(req.Method, r.Method) {
-			return jsonResponse(http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			continue
 		}
 		switch route {
 		case RouteAdminOverview:
@@ -47,7 +57,16 @@ func handleAdminAPI(req pluginapi.ManagementRequest, table *routingTable, cfg Pl
 			return handleAdminAuths(table)
 		case RouteAdminValidate:
 			return handleAdminValidate(req.Body)
+		case RouteAdminConfig, RouteAdminAPIKeys:
+			return handleAdminConfig(req, route)
+		case RouteAdminSave, RouteAdminRetry:
+			return handleAdminSave(req, route)
+		case RouteAdminDiagnostics:
+			return handleAdminDiagnostics(req, cfg)
 		}
+	}
+	if matched {
+		return jsonResponse(http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
 	return jsonResponse(http.StatusNotFound, map[string]string{"error": "not_found"})
 }
@@ -89,6 +108,7 @@ func adminOverview(table *routingTable, cfg PluginConfig, now time.Time) AdminOv
 	for _, s := range table.seats {
 		as := AdminSeat{
 			Name:    s.user.Name,
+			Paused:  s.user.Paused,
 			Keys:    len(s.apiKeys),
 			Primary: append([]string{}, s.authIDs...),
 			Expired: s.expired(now),
@@ -169,6 +189,7 @@ func handleAdminValidate(body []byte) ([]byte, error) {
 	if err != nil {
 		return jsonResponse(http.StatusOK, map[string]any{"valid": false, "error": err.Error()})
 	}
+	defer table.monitor.close()
 	return jsonResponse(http.StatusOK, map[string]any{"valid": true, "seats": len(table.seats), "config_revision": table.configRevision})
 }
 

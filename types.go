@@ -6,7 +6,7 @@ import (
 )
 
 // PluginVersion is the semantic release version of the carpool plugin.
-const PluginVersion = "0.5.0"
+const PluginVersion = "0.6.0"
 
 // PluginSchemaVersion is the RPC contract version declared at plugin.register.
 // Version 2 adds request.complete, which the concurrency limit needs; version 6
@@ -37,9 +37,14 @@ const (
 const (
 	managementBasePath = "/v0/management"
 
-	RouteAdminOverview = "/carpool/overview"
-	RouteAdminAuths    = "/carpool/auths"
-	RouteAdminValidate = "/carpool/validate"
+	RouteAdminOverview    = "/carpool/overview"
+	RouteAdminAuths       = "/carpool/auths"
+	RouteAdminValidate    = "/carpool/validate"
+	RouteAdminConfig      = "/carpool/config"
+	RouteAdminAPIKeys     = "/carpool/api-keys"
+	RouteAdminSave        = "/carpool/save"
+	RouteAdminRetry       = "/carpool/save/retry"
+	RouteAdminDiagnostics = "/carpool/diagnostics"
 )
 
 // Envelope is the standard JSON envelope exchanged with the CPA plugin ABI.
@@ -96,6 +101,8 @@ type PluginConfig struct {
 type UserConfig struct {
 	Name    string   `yaml:"name" json:"name"`
 	APIKeys []string `yaml:"api-keys" json:"api-keys"`
+	// Paused seats retain their keys and bindings and explicitly reject requests.
+	Paused bool `yaml:"paused,omitempty" json:"paused,omitempty"`
 	// Primary lists the exact CPA Auth IDs of the seat: the auth file path relative
 	// to the CPA auth directory, e.g. "codex-042c0005-alice@example.com-team.json" or
 	// "team/codex-....json". Matching is exact (case and the .json suffix are
@@ -130,7 +137,7 @@ type ResetCreditItem struct {
 }
 
 // SeatLimits reports a seat's request limits and its current use of them. Use is
-// only counted while some seat has a limit, since only then are the request hooks
+// only counted while a seat has a limit or is paused, since then the request hooks
 // registered.
 type SeatLimits struct {
 	MaxConcurrency int `json:"max_concurrency"` // 0 = unlimited
@@ -184,6 +191,7 @@ type AdminOverview struct {
 // AdminSeat is the runtime state of one compiled seat.
 type AdminSeat struct {
 	Name      string     `json:"name"`
+	Paused    bool       `json:"paused"`
 	Keys      int        `json:"keys"`
 	Primary   []string   `json:"primary"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`

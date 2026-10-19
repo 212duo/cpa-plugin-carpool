@@ -52,6 +52,8 @@ plugins:
       users:
         - name: "TeamA-席位1"                 # 买家在 Portal 上看到的名字，不能重复
           api-keys: ["sk-buyer-alice-change-me"]
+          # 可选：暂停时保留 key 与绑定并拒绝访问，恢复后继续使用原 key。
+          paused: false
           # CPA 中的账号 ID：auth 目录下的文件路径（含子目录），大小写和 .json 后缀可省略。
           # 可以写多个，调度时按 CPA 优先级选；Portal 显示第一个已加载的。
           primary: ["codex-xxxxxxxx-a1@example.com-team.json"]
