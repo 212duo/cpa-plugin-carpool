@@ -79,8 +79,8 @@ func pageHeaders() http.Header {
 		"Cache-Control":           []string{"no-store"},
 		"Referrer-Policy":         []string{"no-referrer"},
 		"X-Content-Type-Options":  []string{"nosniff"},
-		"X-Frame-Options":         []string{"DENY"},
-		"Content-Security-Policy": []string{"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"},
+		"X-Frame-Options":         []string{"SAMEORIGIN"},
+		"Content-Security-Policy": []string{"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'"},
 	}
 }
 

@@ -219,7 +219,7 @@ func TestMonitorLegacySchemaDoesNotRevealResolvedModels(t *testing.T) {
 
 func TestMonitorPublicPageAndSafeModelNames(t *testing.T) {
 	r := resource(t, base+RouteMonitor, nil, nil)
-	if r.StatusCode != 200 || r.Headers.Get("X-Frame-Options") != "DENY" || !strings.Contains(r.Headers.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+	if r.StatusCode != 200 || r.Headers.Get("X-Frame-Options") != "SAMEORIGIN" || !strings.Contains(r.Headers.Get("Content-Security-Policy"), "frame-ancestors 'self'") {
 		t.Fatal("monitor resource or security headers missing")
 	}
 	for _, v := range []string{"demo@example.test", "sk-secret-key", "<img src=x>", strings.Repeat("x", 129), "../../auth.json", ""} {
