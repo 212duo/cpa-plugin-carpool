@@ -154,6 +154,8 @@ func handleAPIStatus(req pluginapi.ManagementRequest, table *routingTable, cfg P
 		QuotaSupported: supportsUpstreamQuota(entry),
 		UpstreamUsage:  map[string]any{},
 		IsCooling:      isCooling(entry.AuthIndex, now),
+		// Shown so a buyer can see the gateway lifted a stale cooldown by itself.
+		LastAutoClearAt: autoClear.lastClearOf(entry.AuthIndex),
 	}
 	if !buyer.expireAt.IsZero() {
 		resp.ExpiresAt = &buyer.expireAt

@@ -83,6 +83,7 @@ func adminOverview(table *routingTable, cfg PluginConfig, now time.Time) AdminOv
 		return out
 	}
 	out.ConfigRevision = table.configRevision
+	out.AutoClear = autoClear.overview(table)
 	if table.configErr != nil {
 		out.ConfigError = table.configErr.Error()
 		return out
@@ -129,6 +130,8 @@ func adminOverview(table *routingTable, cfg PluginConfig, now time.Time) AdminOv
 				Disabled:    entry.Disabled,
 				Unavailable: entry.Unavailable,
 				Cooling:     isCooling(entry.AuthIndex, now),
+				// Last automatic stale cooldown clear of this account.
+				LastAutoClearAt: autoClear.lastClearOf(entry.AuthIndex),
 			}
 		}
 		out.Seats = append(out.Seats, as)

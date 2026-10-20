@@ -6,7 +6,7 @@ import (
 )
 
 // PluginVersion is the semantic release version of the carpool plugin.
-const PluginVersion = "0.6.0"
+const PluginVersion = "0.7.0"
 
 // PluginSchemaVersion is the RPC contract version declared at plugin.register.
 // Version 2 adds request.complete, which the concurrency limit needs; version 6
@@ -75,6 +75,11 @@ type EnvelopeError struct {
 //	      public-base-url: "https://api.example.com"    # optional
 //	      max-concurrency: 0                            # optional default per seat
 //	      rpm: 0                                        # optional default per seat
+//	      auto-clear-stale-cooldown: false              # optional, see cooldown.go
+//	      used-percent-threshold: 90
+//	      check-interval: 1m
+//	      min-interval: 10m
+//	      max-per-window: 2
 //	      users: [...]
 type PluginConfig struct {
 	Enabled bool   `yaml:"enabled" json:"enabled"`
@@ -90,6 +95,20 @@ type PluginConfig struct {
 	MaxConcurrency int          `yaml:"max-concurrency" json:"max-concurrency"`
 	RPM            int          `yaml:"rpm" json:"rpm"`
 	Users          []UserConfig `yaml:"users" json:"users"`
+
+	// AutoClearStaleCooldown turns on the background watcher that clears CPA's
+	// quota cooldown of a seat account once the upstream quota has recovered.
+	// Off by default. The json tags omit empty values so configurations that do
+	// not use it keep their config revision.
+	AutoClearStaleCooldown bool `yaml:"auto-clear-stale-cooldown" json:"auto-clear-stale-cooldown,omitempty"`
+	// UsedPercentThreshold: the 5h window must be below it; 0 means the default 90.
+	UsedPercentThreshold float64 `yaml:"used-percent-threshold" json:"used-percent-threshold,omitempty"`
+	// CheckInterval is how often the watcher runs, a Go duration; at least 1m.
+	CheckInterval string `yaml:"check-interval" json:"check-interval,omitempty"`
+	// MinInterval is the minimum gap between two automatic clears of one account.
+	MinInterval string `yaml:"min-interval" json:"min-interval,omitempty"`
+	// MaxPerWindow caps automatic clears per account in one 5h quota window.
+	MaxPerWindow int `yaml:"max-per-window" json:"max-per-window,omitempty"`
 
 	// Priority and Store are read by CPA itself. They are declared only so that
 	// strict decoding accepts them.
@@ -170,6 +189,9 @@ type BuyerStatusResponse struct {
 	TotalTokens      int64             `json:"total_tokens"`
 	IsCooling        bool              `json:"is_cooling"`
 	ExpiresAt        *time.Time        `json:"expires_at,omitempty"`
+	// LastAutoClearAt is when the plugin last cleared this seat account's stale
+	// cooldown automatically, nil when it never did since the plugin started.
+	LastAutoClearAt *time.Time `json:"last_auto_clear_at,omitempty"`
 }
 
 // AdminOverview is the runtime state shown on the admin page. The seats'
@@ -183,9 +205,30 @@ type AdminOverview struct {
 	// max-concurrency is not enforced.
 	LegacyHost bool `json:"legacy_host,omitempty"`
 	// UsageDatabase reports whether the CPA Manager Plus usage database was found.
-	UsageDatabase  bool        `json:"usage_database"`
-	UsageAvailable bool        `json:"usage_available"`
-	Seats          []AdminSeat `json:"seats"`
+	UsageDatabase  bool `json:"usage_database"`
+	UsageAvailable bool `json:"usage_available"`
+	// AutoClear reports the stale cooldown watcher.
+	AutoClear AutoClearOverview `json:"auto_clear"`
+	Seats     []AdminSeat       `json:"seats"`
+}
+
+// AutoClearOverview is the state of the stale cooldown watcher on the admin page.
+type AutoClearOverview struct {
+	Enabled bool `json:"enabled"`
+	// Last is the latest automatic clear since the plugin started.
+	Last *AutoClearEvent `json:"last,omitempty"`
+}
+
+// AutoClearEvent records one automatic cooldown clear. It holds no email or token.
+type AutoClearEvent struct {
+	At          time.Time `json:"at"`
+	Seats       []string  `json:"seats"`
+	AuthIndex   string    `json:"auth_index"`
+	Account     string    `json:"account"` // masked
+	UsedPercent float64   `json:"used_percent"`
+	Reason      string    `json:"reason"`
+	// PreviousRecoverAt is the cooldown end CPA had scheduled before the clear.
+	PreviousRecoverAt time.Time `json:"previous_recover_at"`
 }
 
 // AdminSeat is the runtime state of one compiled seat.
@@ -210,6 +253,8 @@ type AdminSeatAuth struct {
 	Disabled    bool   `json:"disabled,omitempty"`
 	Unavailable bool   `json:"unavailable,omitempty"`
 	Cooling     bool   `json:"cooling"`
+	// LastAutoClearAt is the latest automatic cooldown clear of this account.
+	LastAutoClearAt *time.Time `json:"last_auto_clear_at,omitempty"`
 }
 
 // AdminAuth is one CPA account offered when binding a seat.

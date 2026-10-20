@@ -44,6 +44,7 @@ This plugin runs inside CPA as a native shared library, with no database and no 
 | **Fail-closed config** | A broken config makes the plugin reject every request and log the reason, instead of letting buyer keys fall through to the default scheduler and the whole account pool |
 | **Buyer portal** | Usage and reset countdowns for the 5-hour and weekly windows, concurrency and RPM usage, reset credits, historical token usage |
 | **Client setup guide** | The portal generates Codex CLI, Claude Code, Cursor and OpenAI-compatible client configs for the buyer's key, ready to copy |
+| **Stale cooldown auto-clear** | Optional (off by default): when the upstream quota recovers early, clears the quota cooldown CPA still enforces, so buyers do not wait for the original recovery time; debounced and capped |
 | **Self-service reset** | Redeems an official reset credit and immediately clears the account's cooldown through a CPA host callback |
 | **Owner admin page** | Add, edit and delete seats, generate random keys, bind accounts, set limits and leases, see account state and usage; changes are validated with the plugin's rules before saving |
 | **Minimal exposure** | Responses to buyers only contain whitelisted fields; no email, account_id or tokens |
@@ -173,6 +174,11 @@ The config lives under `plugins.configs.cpa-carpool`. Parsing is **strict**: a m
 | `public-base-url` | string | The address clients use to reach the gateway (e.g. `https://api.example.com`), shown in the portal's setup guide; empty uses the address the portal was opened on |
 | `max-concurrency` | int | Default concurrent request limit for seats that don't set one; `0` (default) means unlimited |
 | `rpm` | int | Default requests-per-minute limit for seats that don't set one; `0` (default) means unlimited |
+| `auto-clear-stale-cooldown` | bool | `true` turns on [stale cooldown auto-clear](#-stale-cooldown-auto-clear-070). Default `false` |
+| `used-percent-threshold` | number | Clear only while the upstream 5-hour window is below this used percentage. Default `90`, range 1–100 |
+| `check-interval` | string | How often to check (Go duration, e.g. `1m`, `90s`). Default `1m`; values below `1m` run every `1m` |
+| `min-interval` | string | Minimum gap between two automatic clears of one account. Default `10m` |
+| `max-per-window` | int | Maximum automatic clears per account in one 5-hour window. Default `2` |
 | `users[].paused` | bool | Pause the seat while retaining its keys and bindings; requests are explicitly rejected. Default `false` |
 | `users[].name` | string | Seat name shown in the portal, **must be unique**; defaults to `seat-N` |
 | `users[].api-keys` | []string | Keys assigned to the seat, **at least one**; a key may not appear in two seats |
@@ -231,6 +237,34 @@ History comes from events already collected into CPA Manager Plus's `usage.sqlit
 * The portal shows the current key's records; the admin page aggregates all keys currently assigned to the seat. Counts include recorded successful and failed requests. Replaced or removed keys no longer contribute to that seat's totals.
 * Both old and new database schemas are supported. New schemas use normalized input and cache-read counts; cache creation is not reported as a cache hit. No matching records means zero usage; a missing, unreadable or incompatible database means unavailable statistics.
 * With separate Docker containers, mount Manager's complete data directory read-only into CPA, for example at `/opt/cpa/manager-data`, and set `db-path` to the path inside the CPA container. Include access to `usage.sqlite-wal` and `usage.sqlite-shm`; copying only the main database can miss recent events. Auto-detection cannot read files in another container.
+
+## 🧊 Stale cooldown auto-clear (0.7.0)
+
+CPA never probes an account while it is cooling down, and the used percentage in upstream response headers does not lift a cooldown either. Upstream declined to change this ([#6655](https://github.com/router-for-me/CLIProxyAPI/issues/6655), [#5639](https://github.com/router-for-me/CLIProxyAPI/issues/5639), [#5611](https://github.com/router-for-me/CLIProxyAPI/issues/5611), [#5277](https://github.com/router-for-me/CLIProxyAPI/issues/5277), [#5404](https://github.com/router-for-me/CLIProxyAPI/issues/5404)) and suggests calling the cooldown reset yourself. When OpenAI resets quotas early, the account works again but CPA keeps the original cooldown (across restarts with `save-cooldown-status`), and since this plugin is exclusive and never falls back, the buyer keeps getting 503.
+
+With `auto-clear-stale-cooldown` on, the plugin checks the `primary` accounts of every seat that is not paused or expired once per `check-interval` (deduplicated by auth_index, Codex accounts only). It calls CPA's `host.routing.reset_cooldown` (the same as `POST /v8/management/routing/cooldown/reset`) only when all of these hold:
+
+1. CPA shows the account cooling down with a recovery time;
+2. the cooldown is quota related: `usage_limit`, `credential_quota`, `quota`, or the Codex 400 `not supported when using Codex with a ChatGPT account` that CPA files as a 12-hour model-support cooldown during quota storms;
+3. the **live** upstream 5-hour window is below `used-percent-threshold`, the weekly window is not used up and the upstream does not report `limit_reached`;
+4. at least `min-interval` has passed since the account's last automatic clear, and fewer than `max-per-window` clears happened in the current 5-hour window.
+
+It never clears credential failures (401, revoked / invalidated / expired tokens, invalid_grant), disabled accounts, unrecognized cooldown reasons, or when the upstream quota query fails or returns incomplete data. An account that really just hit a 429 shows a full window upstream and is left alone.
+
+Every clear writes an info line to the CPA log with the seat names, masked account, auth_index, upstream used percentage and the previous recovery time; the admin page and `/api/status` (`last_auto_clear_at`) show the latest automatic clear. The plugin only lifts the cooldown; exclusive, no-fallback scheduling is unchanged.
+
+```yaml
+plugins:
+  configs:
+    cpa-carpool:
+      auto-clear-stale-cooldown: true
+      used-percent-threshold: 90
+      check-interval: 1m
+      min-interval: 10m
+      max-per-window: 2
+```
+
+When a seat account is unavailable, the buyer's error now names the cooldown category (quota exhausted, model temporarily rejected, credentials need attention, ...) and the expected recovery time, and says only this seat is affected. It contains no account ID, email, token or raw upstream error.
 
 ## ⏳ Seat limits
 
@@ -348,6 +382,7 @@ PLATFORM=linux/arm64 sh build.sh   # cross-build for arm64 (needs QEMU support i
 ├── portal.go          # resource dispatch, portal and the status / reset endpoints
 ├── admin.go           # admin endpoints: seat overview, account list, config validation
 ├── host.go            # CPA host callbacks: accounts, credentials, cooldown, logging
+├── cooldown.go        # stale cooldown auto-clear, buyer rejection reasons
 ├── upstream.go        # ChatGPT quota and reset-credit API, 30 s cache, field whitelist
 ├── stats.go           # reads CPA Manager Plus's usage database
 ├── types.go           # config and response types
@@ -368,6 +403,7 @@ Please read [CONTRIBUTING.md](./CONTRIBUTING.md) (Chinese) before contributing. 
 - [x] **v0.1.0**: standalone prototype (Python + Caddy) validating the countdowns, one-click reset and field masking
 - [x] **v0.2.0**: native CPA v8 plugin; exact binding, lease expiry, fail-closed config; cooldown cleared through host callbacks
 - [x] **v0.3.0**: per-seat concurrency / RPM limits (shared by the seat's keys); client setup guides in the portal (Codex CLI, Claude Code, Cursor, OpenAI-compatible)
+- [ ] **v0.7.0**: clear stale cooldowns once the upstream quota recovers; rejection reasons with cooldown category and expected recovery time
 - [x] **v0.6.0**: backend save jobs and retries, revision checks, failed-read protection, seat pause and bulk renewal, deployment diagnostics, same-origin iframe and reverse-proxy compatibility
 - [x] **v0.5.0**: private per-key request monitoring and wider Portal / admin layouts
 - [x] **v0.4 development milestone (included in v0.5.0)**: owner admin page (seat management, key generation, account binding, limits and usage); plugin store release assets and registry entry

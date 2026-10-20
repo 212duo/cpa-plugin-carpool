@@ -28,9 +28,11 @@ type routingTable struct {
 	// limited is true when any seat has a limit or is paused. Only then does
 	// the plugin register its request hooks, which see every request's body.
 	limited bool
-	seats   []*seat // in configuration order
-	byKey   map[string]*seat
-	byScope map[string]*seat
+	// autoClear is the validated stale cooldown watcher configuration.
+	autoClear autoClearSettings
+	seats     []*seat // in configuration order
+	byKey     map[string]*seat
+	byScope   map[string]*seat
 }
 
 // seat is one compiled buyer entry.
@@ -69,6 +71,9 @@ func compileRouting(cfg PluginConfig) (*routingTable, error) {
 	table.publicBaseURL = baseURL
 	if cfg.MaxConcurrency < 0 || cfg.RPM < 0 {
 		return nil, fmt.Errorf("max-concurrency and rpm must not be negative (0 means unlimited)")
+	}
+	if table.autoClear, err = compileAutoClear(cfg); err != nil {
+		return nil, err
 	}
 
 	names := make(map[string]int)
@@ -278,7 +283,8 @@ func pickAuth(raw []byte, table *routingTable) ([]byte, error) {
 		})
 	}
 
-	// 4. Fail-closed: Never fall back to unassigned accounts (e.g. personal Pro 5x)
+	// 4. Fail-closed: Never fall back to unassigned accounts (e.g. personal Pro 5x).
+	// The reason tells the buyer why and until when, without account details.
 	if table.debug {
 		logf("debug", "seat %s: none of its auths is among %d candidates, rejecting", s.user.Name, len(req.Candidates))
 	}
@@ -286,6 +292,6 @@ func pickAuth(raw []byte, table *routingTable) ([]byte, error) {
 		Handled:      true,
 		Reject:       true,
 		RejectCode:   "auth_unavailable",
-		RejectReason: fmt.Sprintf("carpool: your dedicated seat (%s) is currently in cooldown or unavailable", s.user.Name),
+		RejectReason: seatRejectReason(s, time.Now()),
 	})
 }
