@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 未发布
+
+### 新增
+
+- 自动清除过期冷却（`auto-clear-stale-cooldown`，默认关闭）：后台每 `check-interval`（默认 1m，下限 1m）检查未暂停、未到期席位的 primary 账号（按 auth_index 去重）。CPA 显示冷却、冷却原因属于额度类（`usage_limit` / `credential_quota` / `quota`，以及额度风暴中被误判为 12 小时模型不支持的 Codex 400 `not supported when using Codex with a ChatGPT account`），且实时查询的上游 5 小时已用比例低于 `used-percent-threshold`（默认 90）、周窗口未用满时，调用 `host.routing.reset_cooldown` 解除冷却。背景：CPA 冷却期内不探测、响应头不清冷却，官方不计划修改（CLIProxyAPI #6655、#5639、#5611、#5277、#5404）。
+- 防护：凭证失效（401、token 撤销 / 失效 / 过期、invalid_grant）、账号停用、无法识别的原因、上游查询失败时不清除；同一账号两次自动清除间隔至少 `min-interval`（默认 10m），每个 5 小时窗口最多 `max-per-window`（默认 2）次。
+- 每次自动清除写 info 日志（席位名、掩码账号、auth_index、上游已用比例、原恢复时间）；`/api/status` 返回 `last_auto_clear_at`，Portal 与管理页面显示最近一次自动清除时间。
+
+### 变更
+
+- 席位账号不可用时，返回给买家的 `auth_unavailable` 错误说明冷却原因分类和预计恢复时间，并注明只影响该席位；不包含账号 ID、邮箱、token 或上游原始错误。结果按席位缓存 5 秒。独占、不回落的调度规则不变。
+
 ## [0.6.0] - 2026-10-19
 
 ### 新增

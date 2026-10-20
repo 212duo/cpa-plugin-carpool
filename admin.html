@@ -513,6 +513,10 @@ function renderAlerts() {
   if (!S.configExists) {
     html += '<div class="alert alert-info">config.yaml 中还没有 plugins.configs.' + esc(pluginId) + ' 配置段，保存时会自动创建。</div>';
   }
+  if (ov.auto_clear && ov.auto_clear.last) {
+    const ac = ov.auto_clear.last;
+    html += '<div class="alert alert-info">最近一次自动清除过期冷却：' + esc(formatDate(ac.at)) + '，席位 ' + esc((ac.seats || []).join("、")) + '（上游 5 小时已用 ' + esc(ac.used_percent) + '%）。' + (ov.auto_clear.enabled ? '' : '自动清除当前已关闭。') + '</div>';
+  }
   if (ov.legacy_host) {
     html += '<div class="alert alert-warn">当前 CPA 版本不会通知插件请求何时结束，并发上限不会生效（RPM 限制仍然生效）。</div>';
   }
@@ -599,6 +603,7 @@ function renderSeats() {
         account += '<div>' + (rt.auth.provider ? '<span class="badge b-gray">' + esc(rt.auth.provider) + '</span>' : '');
         if (rt.auth.disabled) account += '<span class="badge b-red">已停用</span>';
         else if (rt.auth.cooling) account += '<span class="badge b-orange">冷却中</span>';
+        if (rt.auth.last_auto_clear_at) account += '<div class="sub">自动解除冷却于 ' + esc(formatDate(rt.auth.last_auto_clear_at)) + '</div>';
         else if (rt.auth.unavailable || (rt.auth.status && rt.auth.status !== "active")) account += '<span class="badge b-red">不可用</span>';
         else account += '<span class="badge b-green">可用</span>';
         if (rt.auth.id && primary[0] && rt.auth.id.toLowerCase().replace(/\.json$/, "") !== String(primary[0]).toLowerCase().replace(/\.json$/, "")) {

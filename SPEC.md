@@ -93,7 +93,7 @@
 3. 识别调用方：优先使用 CPA 提供的 `caller_scope`（`sha256("cli-proxy-api:caller-scope:v1\0" + key)`），其次是 `Authorization: Bearer` 与 `x-api-key` 请求头。未命中任何席位的 key 交给 CPA 默认调度。
 4. 席位已到期：返回 `Reject`（`seat_expired`）。
 5. 在候选账号中精确匹配席位的账号 ID（忽略大小写、路径分隔符风格和 `.json` 后缀），按 CPA 优先级、再按 ID 排序选第一个。
-6. 没有匹配的候选：返回 `Reject`（`auth_unavailable`），**绝不回落到其他账号**。
+6. 没有匹配的候选：返回 `Reject`（`auth_unavailable`），**绝不回落到其他账号**。`RejectReason` 通过 `host.auth.list` 读取席位账号的运行时状态，给出脱敏后的冷却原因分类（额度用尽 / 模型暂被拒绝 / 凭证失效 / 上游临时错误）、预计恢复时间（RFC3339 与剩余时长）和“仅影响本席位”的说明；不包含账号 ID、邮箱、token 或 CPA 原始状态信息。同一席位的结果缓存 5 秒，避免冷却期间每个请求都调用宿主；宿主不可用时退回通用提示。
 
 > CPA 同一时间只调用一个调度插件（优先级最高的那个），返回 `Handled=false` 时直接使用内置调度。因此本插件不能与 key-router 等其他调度插件同时使用。
 
@@ -123,7 +123,7 @@ CPA 的插件资源路由不需要管理密钥、只接受 GET、按精确路径
 | `host.auth.list` | 把席位的账号 ID 解析为 CPA 运行时的 `auth_index`（只包含基于认证文件的账号和纯运行时账号，不含 `config.yaml` 中的 API Key 账号） |
 | `host.auth.get` | 读取账号凭据 JSON（`access_token`、`account_id`） |
 | `host.auth.get_runtime` | 读取运行时状态（`unavailable`、`next_retry_after`）判断是否冷却中 |
-| `host.routing.reset_cooldown` | 解除账号的额度与冷却状态，等同于管理接口 `POST /v8/management/routing/cooldown/reset` |
+| `host.routing.reset_cooldown` | 解除账号的额度与冷却状态，等同于管理接口 `POST /v8/management/routing/cooldown/reset`；用于核销重置卡后与自动清除过期冷却（见 3.12） |
 | `host.log` | 写入 CPA 日志，失败时回退到 stderr |
 
 插件还实现以下由宿主调用的方法：
@@ -171,6 +171,11 @@ plugins:
       public-base-url: ""
       max-concurrency: 0
       rpm: 0
+      auto-clear-stale-cooldown: false   # 见 3.12
+      used-percent-threshold: 90
+      check-interval: 1m
+      min-interval: 10m
+      max-per-window: 2
       users:
         - name: "TeamA-席位1"
           api-keys: ["sk-..."]
@@ -180,7 +185,7 @@ plugins:
           rpm: 30
 ```
 
-校验规则：未知字段报错；每个席位至少一个 `api-keys` 与一个 `primary`；同一 key 不得出现在两个席位；席位名（含自动生成的 `seat-N`）不得重复；`expire-at` 必须为 RFC3339；限额不得为负数；`public-base-url` 必须是不含用户信息、查询参数和片段的 http(s) 地址。`priority` 与 `store` 由 CPA 读取，插件只做声明以通过严格解析。
+校验规则：未知字段报错；每个席位至少一个 `api-keys` 与一个 `primary`；同一 key 不得出现在两个席位；席位名（含自动生成的 `seat-N`）不得重复；`expire-at` 必须为 RFC3339；限额不得为负数；`used-percent-threshold` 为 0（取默认 90）或 1–100；`check-interval`、`min-interval` 必须是正的 Go 时长（`check-interval` 低于 1m 时按 1m 执行并写 warn 日志）；`max-per-window` 不得为负数（0 取默认 2）；`public-base-url` 必须是不含用户信息、查询参数和片段的 http(s) 地址。`priority` 与 `store` 由 CPA 读取，插件只做声明以通过严格解析。
 
 ### 3.9 管理界面
 
@@ -229,6 +234,24 @@ plugins:
 
 ---
 
+### 3.12 自动清除过期冷却（0.7.0）
+
+**背景**：CPA 核心在冷却期内不探测账号，上游响应头的已用比例也不会清除冷却（`quota_signals.go` 只记录观测值，不碰 cooldown）。官方以 not planned 关闭了相关需求（[#6655](https://github.com/router-for-me/CLIProxyAPI/issues/6655) half-open 探测、[#5639](https://github.com/router-for-me/CLIProxyAPI/issues/5639)、[#5611](https://github.com/router-for-me/CLIProxyAPI/issues/5611)、[#5277](https://github.com/router-for-me/CLIProxyAPI/issues/5277)、[#5404](https://github.com/router-for-me/CLIProxyAPI/issues/5404)），建议自行调用冷却重置接口。开启 `save-cooldown-status` 时冷却在重启后恢复；本插件独占、fail-closed（CPA 先按冷却过滤候选，插件找不到席位账号即拒绝），因此上游提前重置额度后买家仍持续 503。
+
+**流程**：`auto-clear-stale-cooldown: true` 且配置有效、插件启用时，后台 goroutine 每 `check-interval`（默认 1m，下限 1m）执行一次；同一时间只有一个 tick，重载配置时按新间隔重启，关闭开关或插件卸载（`shutdown`）时停止。每次 tick：
+
+1. `host.auth.list` 一次，取所有未暂停、未到期席位的 `primary` 账号，按 `auth_index` 去重（多个席位共用一个号只处理一次，日志列出全部席位名）。只处理 Codex 账号。
+2. 跳过：账号停用；`next_retry_after` 不在未来（无恢复时间的不可用视为终态，如 token 撤销）；冷却原因不可清除。
+3. 冷却原因：宿主回调不暴露 CPA 的 `Quota.Reason` 与 `LastError`，只能按 `status_message` 判断（CPA 用它们写入该字段，`save-cooldown-status` 恢复时写入原因字符串）。先匹配凭证失效（`unauthorized`、`invalid_grant`、`token expired`、`revoked`、`refresh token`、`authentication token`、`invalidated`、`deactivated` 等）→ 永不清除；再匹配 Codex 400 `not supported when using codex with a chatgpt account` → 可清除；再匹配 `usage_limit` / `credential_quota` / `quota` → 可清除；其余（含空）→ 不清除。
+4. 防护（在请求上游之前判断）：距该 `auth_index` 上次自动清除不足 `min-interval`（默认 10m）→ 跳过；当前 5 小时窗口内已清除 `max-per-window`（默认 2）次 → 跳过。窗口从该窗口内第一次清除开始，结束于上游 5 小时窗口的 `reset_at`（缺失或不合理时取 5 小时）。
+5. `host.auth.get` + `GET /usage` **实时**查询（不走 30 秒缓存）。请求失败、非 2xx、JSON 无效、缺少 5 小时窗口 `used_percent` → 不清除并写 warn 日志。按 `limit_window_seconds` 识别 5 小时 / 周窗口（默认 primary 为 5 小时）。
+6. 5 小时 `used_percent` < `used-percent-threshold`（默认 90），周窗口 `used_percent` < 100（无周窗口视为未满），且 `limit_reached` 不为 true、`allowed` 不为 false → `host.routing.reset_cooldown`。
+7. 成功后清除该账号的额度缓存与拒绝原因缓存，记录历史，写 info 日志：席位名、掩码账号（如 `codex-***-team`）、`auth_index`、冷却原因、上游 5 小时 / 周已用比例、原 `next_recover_at`。
+
+**展示**：`/api/status` 返回 `last_auto_clear_at`（该席位账号最近一次自动清除时间，Portal 显示）；管理概览返回 `auto_clear.enabled`、`auto_clear.last`（时间、席位、auth_index、掩码账号、已用比例、原因、原恢复时间）和每个席位账号的 `last_auto_clear_at`。历史只保存在进程内，CPA 重启后清空。
+
+**不变量**：只解除冷却，不改变独占、不回落；未开启时不启动 goroutine、不调用任何宿主或上游接口。
+
 ## 4. 实施阶段
 
 | 阶段 | 交付目标 | 核心工作项 | 状态 |
@@ -240,6 +263,10 @@ plugins:
 | **Phase 5** | 管理界面与插件商店 | 席位管理页面、管理接口、商店发布物与 registry 条目 | 已完成，随 v0.5.0 发布；商店收录需单独提交 |
 | **Phase 6** | 请求监控与宽屏页面 | 当前 Key 隔离、请求记录与模型汇总、响应式布局 | 已完成（v0.5.0） |
 
+
+### 0.7 补充
+
+新增自动清除过期冷却（默认关闭）与带冷却原因、预计恢复时间的拒绝提示，见 3.2 与 3.12。
 
 ### 0.6 补充
 

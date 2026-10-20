@@ -119,6 +119,8 @@ func configure(raw []byte) {
 	if prev != nil && prev.monitor != nil {
 		prev.monitor.close()
 	}
+	rejectNotices.drop()
+	autoClear.apply(table)
 }
 
 // loadConfig decodes the lifecycle request of plugin.register / plugin.reconfigure
@@ -208,6 +210,11 @@ var configFields = []pluginapi.ConfigField{
 	{Name: "debug", Type: pluginapi.ConfigFieldTypeBoolean, Default: false, Description: "Log every scheduling decision (seat names only) / 记录每次调度决定（只记录席位名）"},
 	{Name: "db-path", Type: pluginapi.ConfigFieldTypeString, Default: "", Description: "CPA Manager Plus usage.sqlite, auto-detected when empty / CPA Manager Plus 用量数据库，留空自动探测"},
 	{Name: "upstream-user-agent", Type: pluginapi.ConfigFieldTypeString, Default: "", Description: "User-Agent for ChatGPT quota requests / 查询 ChatGPT 额度时使用的 User-Agent"},
+	{Name: "auto-clear-stale-cooldown", Type: pluginapi.ConfigFieldTypeBoolean, Default: false, Description: "Clear CPA's quota cooldown of a seat account once the live upstream quota has recovered / 上游额度已恢复时自动清除席位账号的 CPA 冷却"},
+	{Name: "used-percent-threshold", Type: pluginapi.ConfigFieldTypeNumber, Default: defaultUsedPercentThreshold, Description: "Clear only while the upstream 5h window is below this used percentage / 上游 5 小时窗口已用百分比低于此值才清除"},
+	{Name: "check-interval", Type: pluginapi.ConfigFieldTypeString, Default: "1m", Description: "How often the cooldown watcher runs, at least 1m / 冷却检查间隔，最小 1m"},
+	{Name: "min-interval", Type: pluginapi.ConfigFieldTypeString, Default: "10m", Description: "Minimum gap between two automatic clears of one account / 同一账号两次自动清除的最小间隔"},
+	{Name: "max-per-window", Type: pluginapi.ConfigFieldTypeInteger, Default: defaultMaxClearsPerWindow, Description: "Maximum automatic clears per account in one 5h window / 每个账号每个 5 小时窗口最多自动清除次数"},
 }
 
 func okEnvelope(result any) ([]byte, error) {

@@ -424,6 +424,9 @@ async function doQuery() {
     let html = '<div class="overview-grid"><div class="status-card"><div class="panel-title">席位状态</div>';
     html += '<div class="stat-row"><span class="stat-label">绑定席位</span><span class="stat-val">' + esc(d.seat_name) + '</span></div>';
     html += '<div class="stat-row"><span class="stat-label">网关状态</span><span class="stat-val">' + statusBadge + '</span></div>';
+    if (d.last_auto_clear_at) {
+      html += '<div class="stat-row"><span class="stat-label">上次自动解除冷却</span><span class="stat-val">' + esc(formatDate(d.last_auto_clear_at)) + '</span></div>';
+    }
     if (d.expires_at) {
       html += '<div class="stat-row"><span class="stat-label">租期到期</span><span class="stat-val">' + esc(formatDate(d.expires_at)) + '</span></div>';
     }

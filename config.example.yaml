@@ -49,6 +49,14 @@ plugins:
       max-concurrency: 0
       rpm: 0
 
+      # 可选：上游额度已恢复时自动解除 CPA 的过期冷却（默认关闭）。
+      # 只处理 Codex 席位账号的额度类冷却；凭证失效、上游查询失败时不清除。
+      auto-clear-stale-cooldown: false
+      used-percent-threshold: 90      # 上游 5 小时窗口已用 % 低于此值才清除
+      check-interval: 1m              # 检查间隔，最小 1m
+      min-interval: 10m               # 同一账号两次自动清除的最小间隔
+      max-per-window: 2               # 同一账号每个 5 小时窗口最多清除次数
+
       users:
         - name: "TeamA-席位1"                 # 买家在 Portal 上看到的名字，不能重复
           api-keys: ["sk-buyer-alice-change-me"]
@@ -75,4 +83,5 @@ plugins:
 #   - 同一个 key 不能分配给两个席位，席位名（含留空时生成的 seat-N）不能重复
 #   - expire-at 必须是 RFC3339 格式
 #   - max-concurrency、rpm 不能是负数
+#   - used-percent-threshold 为 1–100；check-interval、min-interval 是 1m、90s 这样的时长；max-per-window 不能是负数
 #   - public-base-url 必须是不带查询参数的 http(s) 地址

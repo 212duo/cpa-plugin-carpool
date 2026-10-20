@@ -44,6 +44,7 @@
 | **配置出错即拒绝** | 配置写错时插件拒绝所有请求并在 CPA 日志里说明原因，而不是让买家 key 落到默认调度、用到整个号池 |
 | **买家 Portal** | 5 小时窗口 / 周窗口已用比例与刷新倒计时、并发与 RPM 用量、重置卡列表、历史 Token 用量 |
 | **客户端接入引导** | Portal 里按买家的 key 生成 Codex CLI、Claude Code、Cursor 和 OpenAI 兼容客户端的配置，一键复制 |
+| **自动清除过期冷却** | 可选（默认关闭）：上游额度提前恢复时，自动解除 CPA 仍在执行的额度冷却，买家不用等到原定恢复时间；带防抖和次数上限 |
 | **自助核销重置卡** | 核销一张官方重置卡，并通过 CPA 宿主接口立即解除该账号的冷却 |
 | **车主管理页面** | 席位增删改、随机 key 生成、账号绑定、限额与租期设置，查看账号状态与用量；保存前按插件规则校验 |
 | **最小化暴露** | 返回给买家的数据只保留白名单字段，不包含邮箱、account_id、token |
@@ -173,6 +174,11 @@ https://你的域名/v0/resource/plugins/cpa-carpool/portal#key=sk-buyer-alice
 | `public-base-url` | string | 客户端访问网关的地址（如 `https://api.example.com`），用于 Portal 接入引导；留空使用打开 Portal 的地址 |
 | `max-concurrency` | int | 席位默认并发上限，席位没单独设置时使用；`0`（默认）为不限 |
 | `rpm` | int | 席位默认每分钟请求上限，席位没单独设置时使用；`0`（默认）为不限 |
+| `auto-clear-stale-cooldown` | bool | `true` 开启[自动清除过期冷却](#-自动清除过期冷却070)；默认 `false` |
+| `used-percent-threshold` | number | 上游 5 小时窗口已用百分比低于此值才清除；默认 `90`，范围 1–100 |
+| `check-interval` | string | 检查间隔（Go 时长，如 `1m`、`90s`）；默认 `1m`，低于 `1m` 按 `1m` 执行 |
+| `min-interval` | string | 同一账号两次自动清除的最小间隔；默认 `10m` |
+| `max-per-window` | int | 同一账号每个 5 小时窗口最多自动清除次数；默认 `2` |
 | `users[].paused` | bool | `true` 暂停该席位，保留 key 与绑定并拒绝请求；默认 `false` |
 | `users[].name` | string | 席位名，显示在 Portal 上，**不能重复**；留空时为 `seat-N` |
 | `users[].api-keys` | []string | 分配给该席位的 key，**至少一个**，同一个 key 不能出现在两个席位里 |
@@ -231,6 +237,34 @@ sqlite3 /实际路径/usage.sqlite < scripts/usage-monitor-index.sql
 * Portal 显示当前登录 Key 的记录；管理页汇总席位当前绑定的所有 Key。调用次数包括已记录的成功与失败请求。更换或移除 Key 后，不再汇总旧 Key 的记录。
 * 兼容新旧数据库字段：新版优先使用标准化输入量与缓存读取量，缓存创建量不会误算为缓存命中。数据库无匹配记录时显示 0；缺失、无权限或结构不兼容时显示“统计暂不可用”。
 * CPA 和 Manager Plus 分别运行在 Docker 容器时，需要把 Manager 的完整数据目录只读挂载到 CPA，例如 `/opt/cpa/manager-data`，并将 `db-path` 指向该容器内的 `usage.sqlite`。请同时保留 `usage.sqlite-wal`、`usage.sqlite-shm` 的可见性，不要只复制主数据库文件。自动探测不会跨容器读取文件。
+
+## 🧊 自动清除过期冷却（0.7.0）
+
+CPA 在账号冷却期间不会去探测上游，上游响应头里的已用比例也不会解除冷却；官方明确不改这一点（[#6655](https://github.com/router-for-me/CLIProxyAPI/issues/6655)、[#5639](https://github.com/router-for-me/CLIProxyAPI/issues/5639)、[#5611](https://github.com/router-for-me/CLIProxyAPI/issues/5611)、[#5277](https://github.com/router-for-me/CLIProxyAPI/issues/5277)、[#5404](https://github.com/router-for-me/CLIProxyAPI/issues/5404)），建议用户自己调用冷却重置接口。OpenAI 提前全局重置额度时，账号其实已经能用，但 CPA 仍按原定时间冷却（开启 `save-cooldown-status` 时重启也不会消失）；本插件又是独占、不回落的，买家会一直收到 503。
+
+开启 `auto-clear-stale-cooldown` 后，插件每隔 `check-interval` 检查一次所有**未暂停、未到期**席位的 `primary` 账号（按 auth_index 去重，只检查 Codex 账号）。同时满足以下条件才会调用 CPA 的 `host.routing.reset_cooldown`（等同于 `POST /v8/management/routing/cooldown/reset`）：
+
+1. CPA 显示该账号正在冷却，且有明确的恢复时间；
+2. 冷却原因属于额度类：`usage_limit`、`credential_quota`、`quota`，或额度风暴中被 CPA 误判为模型不支持（12 小时）的 Codex 400 `not supported when using Codex with a ChatGPT account`；
+3. **实时**查询的上游 5 小时窗口已用比例低于 `used-percent-threshold`，周窗口未用满，上游也没有标记 `limit_reached`；
+4. 距离该账号上次自动清除至少 `min-interval`，且当前 5 小时窗口内自动清除次数未达到 `max-per-window`。
+
+以下情况**不会**清除：凭证失效（401、token 撤销 / 失效 / 过期、invalid_grant）、账号已停用、无法识别的冷却原因、上游额度查询失败或返回内容不完整。刚刚真实 429 的账号，上游已用比例是满的，自然不会被清除。
+
+每次清除都会在 CPA 日志写一条 info，包含席位名、掩码后的账号、auth_index、上游已用比例和原定恢复时间；管理页面和 `/api/status`（`last_auto_clear_at`）显示最近一次自动清除时间。插件只解除冷却，不改变独占、不回落的调度规则。
+
+```yaml
+plugins:
+  configs:
+    cpa-carpool:
+      auto-clear-stale-cooldown: true
+      used-percent-threshold: 90
+      check-interval: 1m
+      min-interval: 10m
+      max-per-window: 2
+```
+
+席位账号不可用时，买家收到的错误会说明冷却原因（额度用尽、模型暂被拒绝、凭证失效等分类）和预计恢复时间，并注明只影响该席位；不包含账号 ID、邮箱、token 或上游原始错误。
 
 ## ⏳ 席位限额
 
@@ -307,6 +341,7 @@ curl -H "X-Carpool-Key: sk-buyer-alice" \
 
 * **出错即拒绝**：配置无法解析或校验失败时拒绝全部请求；席位到期、账号不可用时拒绝该席位的请求，从不回落到其他账号。
 * **精确匹配**：账号 ID 精确比较，不做前缀、后缀或邮箱模糊匹配。
+* **拒绝原因脱敏**：席位冷却时返回给买家的错误只有席位名、冷却原因分类和预计恢复时间，不含账号、邮箱、token 或上游原始错误。
 * **字段白名单**：Portal 只返回额度窗口、重置卡（标题/状态/时间）、席位名、席位类型、冷却状态、限额用量和 Token 用量；邮箱、account_id、token 不会出现在响应里。上游接口的原始错误只写进 CPA 日志，买家只看到通用提示。
 * **限额拒绝不泄露信息**：429 响应只包含席位名和限额数值，不包含 key 或账号信息。
 * **管理接口受管理密钥保护**：管理页面本身不含数据；席位状态、账号列表和校验接口挂在 CPA 的 Management API 下，由 CPA 校验管理密钥。概览接口不返回 key。
@@ -348,6 +383,7 @@ PLATFORM=linux/arm64 sh build.sh   # 交叉编译 arm64（需要 Docker 的 QEMU
 ├── portal.go          # 资源路由分发、Portal 与 status / reset 接口
 ├── admin.go           # 管理接口：席位概览、账号列表、配置校验
 ├── host.go            # CPA 宿主回调：账号列表、凭据、冷却状态、日志
+├── cooldown.go        # 自动清除过期冷却、买家拒绝原因
 ├── upstream.go        # ChatGPT 额度与重置卡接口、30 秒缓存、字段白名单
 ├── stats.go           # 读取 CPA Manager Plus 的用量数据库
 ├── types.go           # 配置与响应类型
@@ -368,6 +404,7 @@ PLATFORM=linux/arm64 sh build.sh   # 交叉编译 arm64（需要 Docker 的 QEMU
 - [x] **v0.1.0**：独立原型（Python + Caddy）验证倒计时算法、一键核销与字段脱敏
 - [x] **v0.2.0**：CPA v8 原生插件；精确绑定、租期到期、出错即拒绝；宿主回调解除冷却
 - [x] **v0.3.0**：席位级并发 / RPM 限制（同一席位的 key 共享）；Portal 客户端接入引导（Codex CLI、Claude Code、Cursor、OpenAI 兼容配置模板）
+- [ ] **v0.7.0**：上游额度恢复后自动清除过期冷却；拒绝原因带冷却分类和预计恢复时间
 - [x] **v0.6.0**：后端保存任务与重试、配置冲突检查、防误清空、席位暂停与批量续期、部署诊断、同源 iframe 与反代兼容
 - [x] **v0.5.0**：当前 Key 请求监控、隐私隔离、Portal / 管理页宽屏布局
 - [x] **v0.4 开发里程碑（已纳入 v0.5.0）**：车主管理页面（席位增删改、key 生成、账号绑定、限额与用量）；插件商店发布物与 registry 条目
